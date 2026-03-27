@@ -3,11 +3,6 @@
 # ─────────────────────────────────────────────────────────────
 
 # ── Pipeline outputs ──────────────────────────────────────────
-# SQLite database
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
-
 # Resume/progress state
 *.progress.json
 
