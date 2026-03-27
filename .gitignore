@@ -3,9 +3,6 @@
 # ─────────────────────────────────────────────────────────────
 
 # ── Pipeline outputs ──────────────────────────────────────────
-# Downloaded files (can be large — never commit)
-archive/
-
 # SQLite database
 *.sqlite
 *.sqlite-wal
