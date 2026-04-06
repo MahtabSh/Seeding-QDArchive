@@ -30,7 +30,7 @@ from qdarchive.fetchers import _insert_file_row, PLATFORM_DOWNLOADERS
 from qdarchive.http_client import get_json, download_file, SESSION
 from qdarchive.progress import ProgressState
 from qdarchive.queries import QDA_EXTENSION_QUERIES, QDA_SOFTWARE_QUERIES, QDA_KEYWORD_QUERIES
-from qdarchive.utils import classify_file, safe_folder, year_from_date
+from qdarchive.utils import classify_file, safe_folder, year_from_date, human_delay
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +46,8 @@ def _fetch_detail(global_id: str, item_host: str, item_token: str) -> tuple:
         f"{item_api}/datasets/:persistentId/",
         params={"persistentId": global_id},
         headers=item_auth,
-        retries=5,   # renews Tor circuit on each empty/blocked response
+        retries=5,
+        bypass_proxy=True,
     )
     return detail, item_api, item_auth
 
@@ -119,7 +120,8 @@ def crawl_harvard(
         f"{HARVARD_API}/search",
         params={"q": "test", "type": "dataset", "per_page": 1},
         headers={"X-Dataverse-key": HARVARD_TOKEN},
-        retries=10,   # keep renewing Tor circuits until one works
+        retries=3,
+        bypass_proxy=True,
     )
     if _preflight is None:
         log.error(
@@ -173,6 +175,7 @@ def crawl_harvard(
                 f"{HARVARD_API}/search",
                 params={"q": q_str, "type": "dataset", "per_page": per_page, "start": start},
                 headers=auth_headers,
+                bypass_proxy=True,
             )
 
             if data is None:
@@ -214,6 +217,7 @@ def crawl_harvard(
                     doi_key = f"https://doi.org/{parent_pid.replace('doi:', '')}"
                     if parent_pid in seen_ds_ids:
                         db.append_query(doi_key, clean_q)
+                        db.append_project_query(doi_key, clean_q)
                         continue
                     doi_url = f"https://doi.org/{parent_pid.replace('doi:', '')}"
                     item = {
@@ -236,6 +240,7 @@ def crawl_harvard(
                 doi_key = f"https://doi.org/{global_id.replace('doi:', '')}"
                 if global_id in seen_ds_ids:
                     db.append_query(doi_key, clean_q)
+                    db.append_project_query(doi_key, clean_q)
                     continue
                 seen_ds_ids.add(global_id)
 
@@ -386,7 +391,7 @@ def crawl_harvard(
                     db.insert({
                         "url":                furl,
                         "doi":                doi,
-                        "local_dir":          "",
+                        "local_dir":          local_dir,
                         "local_filename":     fname,
                         "file_type":          ftype,
                         "file_extension":     fext,
@@ -472,23 +477,31 @@ def crawl_harvard(
 
                 db.flush()
                 total_datasets += 1
-                time.sleep(0.5)
+                human_delay(1.5, 4.0, "between datasets")
 
             # ── Pagination ────────────────────────────────────────────────────
+            # Only one page (100 results) is fetched per run. The next offset is
+            # saved to the progress file so the crawl can be resumed later.
             total_count = data.get("data", {}).get("total_count", 0)
-            start += per_page
-            if start >= total_count:
+            next_start  = start + per_page
+            if next_start >= total_count:
                 log.info(f"Harvard: query '{q_str}' exhausted ({total_count} total).")
                 if progress:
                     progress.mark_done(prog_key)
-                break
-
-            if progress:
-                progress.save(prog_key, start)
-            log.info(
-                f"Harvard: '{q_str}' offset {start}/{total_count} "
-                f"| datasets processed={total_datasets}"
-            )
-            time.sleep(1)
+            else:
+                if progress:
+                    progress.save(prog_key, next_start)
+                    log.info(
+                        f"Harvard: '{q_str}' stopping after one page "
+                        f"(offset {next_start}/{total_count}). "
+                        f"Resume offset saved to progress file."
+                    )
+                else:
+                    log.info(
+                        f"Harvard: '{q_str}' stopping after one page "
+                        f"(offset {next_start}/{total_count}). "
+                        f"Pass a ProgressState to resume from this offset next time."
+                    )
+            break
 
     log.info(f"Harvard Dataverse complete: {total_datasets} datasets processed.")

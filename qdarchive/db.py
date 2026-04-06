@@ -162,7 +162,11 @@ class MetadataDB:
     def __init__(self, path: Path):
         # check_same_thread=False lets worker threads share this connection;
         # _lock serialises every write so SQLite never sees concurrent mutations.
-        self.conn = sqlite3.connect(str(path), check_same_thread=False)
+        # timeout=60: wait up to 60 s for a write lock when two pipeline
+        # processes run concurrently (e.g. --sources harvard in one terminal,
+        # --sources zenodo in another).  WAL mode allows concurrent reads;
+        # writes will serialise automatically with this timeout.
+        self.conn = sqlite3.connect(str(path), check_same_thread=False, timeout=60)
         self.conn.row_factory = sqlite3.Row
         self._lock    = threading.Lock()
         self._pending = 0          # inserts since last commit
@@ -257,6 +261,30 @@ class MetadataDB:
     def seen_project_urls(self) -> set:
         with self._lock:
             return {r["project_url"] for r in self.conn.execute("SELECT project_url FROM projects").fetchall()}
+
+    def append_project_query(self, doi: str, new_query: str):
+        """Append new_query to query_string (JSON array) for all projects with this DOI."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, query_string FROM projects WHERE doi = ?", (doi,)
+            ).fetchall()
+            for row in rows:
+                raw = row["query_string"] or "[]"
+                try:
+                    parts = json.loads(raw)
+                    if not isinstance(parts, list):
+                        parts = [raw]
+                except Exception:
+                    parts = [p.strip() for p in raw.split(";") if p.strip()]
+                if new_query not in parts:
+                    parts.append(new_query)
+                    self.conn.execute(
+                        "UPDATE projects SET query_string = ? WHERE id = ?",
+                        (json.dumps(parts, ensure_ascii=False), row["id"]),
+                    )
+            if self._pending:
+                self.conn.commit()
+                self._pending = 0
 
     def insert_project(self, record: dict) -> int:
         """Insert a row into projects and return its new id."""

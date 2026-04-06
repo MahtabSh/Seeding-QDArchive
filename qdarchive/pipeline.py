@@ -30,7 +30,7 @@ def main():
     log = logging.getLogger(__name__)
 
     parser = argparse.ArgumentParser(
-        description="QDArchive Seeding Pipeline v7 — Harvard Dataverse (#10) + Columbia Oral History Archive (#19)",
+        description="QDArchive Seeding Pipeline v7 — Harvard Dataverse, Zenodo, Columbia Oral History Archive",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -66,8 +66,14 @@ Examples:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    db       = MetadataDB(Path(args.db))
-    progress = ProgressState(Path(args.db).with_suffix(".progress.json"))
+    db = MetadataDB(Path(args.db))
+
+    # Use a per-source progress file so two processes running different sources
+    # concurrently (e.g. --sources harvard / --sources zenodo) never overwrite
+    # each other's pagination state.
+    sources_key  = "_".join(sorted(args.sources))
+    progress_path = Path(args.db).with_suffix(f".{sources_key}.progress.json")
+    progress = ProgressState(progress_path)
 
     log.info(f"Pipeline start | sources={args.sources} | max_records={args.max_records} | download={args.download}")
 

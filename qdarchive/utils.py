@@ -3,7 +3,15 @@ Pure utility functions: file classification, path sanitisation, checksums.
 No project-level dependencies — safe to import from anywhere.
 """
 import hashlib
+import logging
+import random
+import time
 from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+# ── Request counter for periodic long pauses ─────────────────────────────────
+_request_counter = 0
 
 # ── QDA software file extensions ─────────────────────────────────────────────
 QDA_EXTENSIONS: set[str] = {
@@ -27,6 +35,29 @@ PRIMARY_EXTENSIONS: set[str] = {
     ".jpg", ".jpeg", ".png", ".tif", ".tiff",
     ".zip", ".tar", ".gz", ".7z",
 }
+
+
+def human_delay(min_s: float = 2.0, max_s: float = 6.0, label: str = "") -> None:
+    """
+    Sleep for a random duration in [min_s, max_s] to mimic human browsing pace.
+
+    Every 30–50 requests also inserts a longer "reading break" (20–45 s) so
+    the request pattern does not look like a bot with a fixed interval.
+    """
+    global _request_counter
+    _request_counter += 1
+
+    # Periodic long pause every 30–50 requests
+    if _request_counter % random.randint(30, 50) == 0:
+        pause = random.uniform(20, 45)
+        log.debug(f"human_delay: long reading pause {pause:.1f}s (request #{_request_counter})")
+        time.sleep(pause)
+        return
+
+    delay = random.uniform(min_s, max_s)
+    if label:
+        log.debug(f"human_delay: {delay:.1f}s ({label})")
+    time.sleep(delay)
 
 
 def classify_file(filename: str) -> str:

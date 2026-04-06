@@ -132,7 +132,7 @@ def fetch_figshare(global_id, item, output_dir, db, seen_urls, download, q):
 
         _insert_file_row(db, seen_urls, {
             "url": furl, "doi": doi,
-            "local_dir": local_dir if download else "",
+            "local_dir": local_dir,
             "local_filename": fname, "file_type": ftype,
             "file_extension": fext, "file_size_bytes": fsize,
             "checksum_md5": checksum, "download_timestamp": ts,
