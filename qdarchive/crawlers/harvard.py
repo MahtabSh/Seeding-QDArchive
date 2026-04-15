@@ -110,6 +110,11 @@ def crawl_harvard(
     max_records: int = 100_000,
     progress: ProgressState = None,
     download: bool = False,
+    allowed_extensions: set[str] | None = None,
+    max_file_size_bytes: int | None = None,
+    gdrive_service=None,
+    gdrive_folder_cache: dict | None = None,
+    gdrive_root_id: str | None = None,
 ):
     mode = "DOWNLOAD" if download else "METADATA ONLY"
     log.info(f"=== Harvard Dataverse  [{mode}] ===")
@@ -362,14 +367,56 @@ def crawl_harvard(
                     license_str = str(lic_raw) if lic_raw else ""
                     license_url = ""
 
-                files = latest.get("files", [])
+                files   = latest.get("files", [])
+                safe_id = safe_folder(global_id)
+                local_dir = f"harvard_dataverse/{safe_id}"
+
                 if not files:
-                    log.info(f"Harvard: no files in {global_id}")
+                    log.info(f"Harvard: no files listed for {global_id} — saving metadata only")
+                    if source_url not in seen_urls:
+                        seen_urls.add(source_url)
+                        db.insert({
+                            "url": source_url, "doi": doi,
+                            "local_dir": "", "local_filename": "",
+                            "file_type": "no_files", "file_extension": "",
+                            "file_size_bytes": None, "checksum_md5": "",
+                            "download_timestamp": "",
+                            "source_name":    item.get("name_of_dataverse", "Harvard Dataverse"),
+                            "source_url":     source_url,
+                            "title":          title,
+                            "description":    description,
+                            "year":           year_from_date(pub_date),
+                            "keywords":       keywords,
+                            "language":       language,
+                            "author":         author,
+                            "uploader_name":  uploader_name,
+                            "uploader_email": uploader_email,
+                            "license":        license_str,
+                            "license_url":    license_url,
+                            "matched_query":  json.dumps([clean_q], ensure_ascii=False),
+                            "manual_download": 0,
+                            "access_note":    "no files in API response",
+                        })
+                    db.insert_project({
+                        "query_string":               clean_q,
+                        "repository_id":              10,
+                        "repository_url":             HARVARD_BASE,
+                        "project_url":                source_url,
+                        "version":                    str(latest.get("versionNumber", "")),
+                        "title":                      title,
+                        "description":                description,
+                        "language":                   language,
+                        "doi":                        doi,
+                        "upload_date":                pub_date[:10] if pub_date else "",
+                        "download_date":              datetime.now(timezone.utc).isoformat(),
+                        "download_repository_folder": "harvard_dataverse",
+                        "download_project_folder":    safe_id,
+                        "download_version_folder":    "",
+                        "download_method":            "API",
+                    })
                     continue
 
                 log.info(f"Harvard: dataset {global_id} — {len(files)} file(s)")
-                safe_id   = safe_folder(global_id)
-                local_dir = f"harvard_dataverse/{safe_id}"
 
                 # ── Write legacy files table ──────────────────────────────────
                 for fi in files:
@@ -443,37 +490,110 @@ def crawl_harvard(
                     df     = fi.get("dataFile", {})
                     fname  = df.get("filename", "")
                     fext   = Path(fname).suffix.lower()
-                    status = "FAILED_LOGIN" if fi.get("restricted", False) else "SUCCEEDED"
+                    fsize  = df.get("filesize", None)
+                    if fi.get("restricted", False):
+                        status = "FAILED_LOGIN"
+                    elif download and max_file_size_bytes and fsize and fsize > max_file_size_bytes:
+                        status = "FAILED_TOO_LARGE"
+                    elif download and allowed_extensions and fext not in allowed_extensions:
+                        status = "SUCCEEDED"   # metadata kept; not downloaded
+                    else:
+                        status = "SUCCEEDED"
                     if fname:
-                        db.insert_project_file(proj_id, fname, fext, status)
+                        db.insert_project_file(proj_id, fname, fext, status, file_size_bytes=fsize)
 
                 # ── Download entire dataset as zip ────────────────────────────
-                if download:
+                # Harvard bundles entire datasets as zip — we always download
+                # the zip when --download is set, regardless of extension filters
+                # (filters only affect per-file status in the DB, not the zip).
+                # Only skip if all files are restricted (no access at all).
+                all_restricted = all(fi.get("restricted", False) for fi in files)
+                if download and all_restricted:
+                    log.info(f"Harvard: all files restricted for {global_id} — skipping zip download")
+                if download and files and not all_restricted:
+                    # Skip if this dataset was already uploaded to Drive in a previous run
+                    _already = db.conn.execute(
+                        "SELECT gdrive_file_id FROM files "
+                        "WHERE doi=? AND gdrive_file_id IS NOT NULL AND gdrive_file_id != ''",
+                        (doi,)
+                    ).fetchone()
+                    if _already:
+                        log.debug(f"Harvard: {global_id} already on Drive ({_already[0]}) — skipping")
+                        db.flush()
+                        total_datasets += 1
+                        human_delay(1.5, 4.0, "between datasets")
+                        continue
                     zip_url  = f"{item_api}/access/dataset/:persistentId/?persistentId={global_id}"
-                    zip_dest = output_dir / "harvard_dataverse" / safe_id / f"{safe_id}.zip"
+                    if gdrive_service and gdrive_root_id:
+                        # ── Stream zip directly to Google Drive ───────────────
+                        from qdarchive.gdrive import (
+                            stream_url_to_drive, _get_or_create_folder,
+                            file_url, folder_url, make_public,
+                        )
+                        cache = gdrive_folder_cache if gdrive_folder_cache is not None else {}
+                        repo_key = "/harvard_dataverse"
+                        if repo_key not in cache:
+                            cache[repo_key] = _get_or_create_folder(gdrive_service, "harvard_dataverse", gdrive_root_id)
+                        proj_key = f"/harvard_dataverse/{safe_id}"
+                        if proj_key not in cache:
+                            fid = _get_or_create_folder(gdrive_service, safe_id, cache[repo_key])
+                            make_public(gdrive_service, fid)
+                            cache[proj_key] = fid
+                        proj_folder_id = cache[proj_key]
 
-                    if not zip_dest.exists():
-                        log.info(f"Harvard: downloading zip for {global_id} -> {zip_dest}")
-                        if download_file(zip_url, zip_dest, extra_headers=item_auth):
-                            ts = datetime.now(timezone.utc).isoformat()
-                            log.info(f"Harvard: zip saved ({zip_dest.stat().st_size:,} bytes)")
-                            extract_dir = output_dir / "harvard_dataverse" / safe_id
-                            try:
-                                with zipfile.ZipFile(zip_dest) as zf:
-                                    zf.extractall(extract_dir)
-                                log.info(f"Harvard: extracted {global_id} to {extract_dir}")
-                                zip_dest.unlink()
+                        gdrive_id = stream_url_to_drive(
+                            gdrive_service, zip_url, f"{safe_id}.zip",
+                            proj_folder_id, extra_headers=item_auth,
+                        )
+                        if gdrive_id:
+                            gurl      = file_url(gdrive_id)
+                            proj_furl = folder_url(proj_folder_id)
+                            # Only update DB if not already recorded
+                            existing_row = db.conn.execute(
+                                "SELECT download_timestamp FROM files WHERE doi=? AND gdrive_file_id=?",
+                                (doi, gdrive_id)
+                            ).fetchone()
+                            if not existing_row:
+                                ts = datetime.now(timezone.utc).isoformat()
                                 db.conn.execute(
-                                    "UPDATE files SET download_timestamp=?, local_dir=? WHERE doi=? AND download_timestamp=''",
-                                    (ts, local_dir, doi),
+                                    "UPDATE files SET download_timestamp=?, gdrive_file_id=?, gdrive_url=? "
+                                    "WHERE doi=? AND download_timestamp=''",
+                                    (ts, gdrive_id, gurl, doi),
+                                )
+                                db.conn.execute(
+                                    "UPDATE projects SET gdrive_folder_id=?, gdrive_folder_url=? "
+                                    "WHERE download_project_folder=? AND (gdrive_folder_id IS NULL OR gdrive_folder_id='')",
+                                    (proj_folder_id, proj_furl, safe_id),
                                 )
                                 db.conn.commit()
-                            except zipfile.BadZipFile:
-                                log.warning(f"Harvard: bad zip for {global_id} — keeping zip file")
+                                log.info(f"Harvard: new upload to Drive → {gurl}")
                         else:
-                            log.warning(f"Harvard: zip download failed for {global_id}")
+                            log.warning(f"Harvard: Drive upload failed for {global_id} after 3 attempts — metadata saved, file skipped")
                     else:
-                        log.info(f"Harvard: zip already exists for {global_id}, skipping.")
+                        # ── Normal download to local disk ─────────────────────
+                        zip_dest = output_dir / "harvard_dataverse" / safe_id / f"{safe_id}.zip"
+                        if not zip_dest.exists():
+                            log.info(f"Harvard: downloading zip for {global_id} -> {zip_dest}")
+                            if download_file(zip_url, zip_dest, extra_headers=item_auth):
+                                ts = datetime.now(timezone.utc).isoformat()
+                                log.info(f"Harvard: zip saved ({zip_dest.stat().st_size:,} bytes)")
+                                extract_dir = output_dir / "harvard_dataverse" / safe_id
+                                try:
+                                    with zipfile.ZipFile(zip_dest) as zf:
+                                        zf.extractall(extract_dir)
+                                    log.info(f"Harvard: extracted {global_id} to {extract_dir}")
+                                    zip_dest.unlink()
+                                    db.conn.execute(
+                                        "UPDATE files SET download_timestamp=?, local_dir=? WHERE doi=? AND download_timestamp=''",
+                                        (ts, local_dir, doi),
+                                    )
+                                    db.conn.commit()
+                                except zipfile.BadZipFile:
+                                    log.warning(f"Harvard: bad zip for {global_id} — keeping zip file")
+                            else:
+                                log.warning(f"Harvard: zip download failed for {global_id}")
+                        else:
+                            log.info(f"Harvard: zip already exists for {global_id}, skipping.")
 
                 db.flush()
                 total_datasets += 1

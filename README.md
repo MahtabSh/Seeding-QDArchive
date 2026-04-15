@@ -6,36 +6,32 @@ project at **FAU Erlangen-Nürnberg**.
 
 ---
 
-## Overview
+## What Was Actually Collected
 
-The pipeline crawls multiple open repositories, collects file metadata into an
-SQLite database, and optionally downloads the files to a local directory tree.
-By default only metadata is recorded — actual file downloads require the
-`--download` flag, which makes it easy to do a fast inventory scan before
-committing to storage.
+This pipeline successfully retrieved data from **two repositories**:
 
-**Repositories crawled:**
-
-| Repository | URL | Auth |
+| Repository | Records Collected | Notes |
 |---|---|---|
-| Zenodo | https://zenodo.org/ | none (public API) |
-| Dryad | https://datadryad.org/ | OAuth2 (auto-refreshed every 10 h) |
-| Syracuse QDR | https://data.qdr.syr.edu/ | API token |
-| DataverseNO | https://dataverse.no/ | none |
-| DANS | https://ssh.datastations.nl/ | none |
-| Harvard Dataverse | https://dataverse.harvard.edu/ | none |
-| Columbia ICPSR | https://www.openicpsr.org/ | account credentials |
+| **Zenodo** | 39,405 projects | Full API crawl across all query tiers |
+| **Harvard Dataverse** | 13,650 projects | Search + OAI-PMH crawl |
+| Columbia Oral History Archive | 25 projects | Limited (scraper only) |
 
----
+The **Columbia** crawler is included but collects very few records because the
+Columbia Oral History Portal does not expose a public API — the crawler
+web-scrapes a limited listing page. For Zenodo and Harvard, both the metadata
+and (where applicable) Google Drive upload links are recorded.
 
-## Requirements
+**Database file:** `23692652-sq26.db`
 
-- Python 3.9+
-- [`requests`](https://pypi.org/project/requests/)
+**Total records in merged database:**
 
-```bash
-pip install requests
-```
+| Table | Rows |
+|---|---|
+| `projects` | 53,080 |
+| `keywords` | 203,849 |
+| `person_role` | 159,344 |
+| `licenses` | 49,603 |
+| `project_files` | 610,131 |
 
 ---
 
@@ -43,172 +39,253 @@ pip install requests
 
 ```
 Seeding-QDArchive/
-├── qdarchive_pipeline.py        # Entry point — delegates to the qdarchive package
-├── qdarchive_pipeline_monolith.py  # Legacy single-file version (kept for reference)
-├── run_until_done.sh            # Shell wrapper to restart pipeline on exit
+├── 23692652-sq26.db             # Main SQLite database (tracked via Git LFS)
+├── qdarchive_pipeline.py        # Entry-point — delegates to the qdarchive package
+├── run_until_done.sh            # Shell wrapper to auto-restart on exit
+├── merge_databases.py           # One-time script to merge old + new databases
 ├── README.md
 ├── .gitignore
+├── .gitattributes               # Git LFS configuration
+│
+├── archive/                     # Downloaded files (not committed)
 │
 └── qdarchive/                   # Core package
     ├── pipeline.py              # CLI argument parsing and orchestration
-    ├── config.py                # Registry of repositories, queries, credentials
     ├── db.py                    # MetadataDB — SQLite wrapper with WAL mode
-    ├── http_client.py           # Shared requests.Session with retry / backoff
     ├── queries.py               # QDA_QUERIES and QDA_EXTENSION_QUERIES
-    ├── progress.py              # Resume-state serialisation (progress.json)
+    ├── progress.py              # Resume-state serialisation (*.progress.json)
     ├── utils.py                 # File classification, path helpers
+    ├── gdrive.py                # Google Drive upload integration
     │
     ├── crawlers/
-    │   ├── harvard.py           # Harvard Dataverse search loop (main entry)
+    │   ├── __init__.py          # Source registry (CRAWLERS dict)
+    │   ├── harvard.py           # Harvard Dataverse search loop
     │   ├── harvard_oai.py       # OAI-PMH crawler for Harvard Dataverse
-    │   └── columbia.py          # OpenICPSR / Columbia scraper
+    │   ├── columbia.py          # Columbia Oral History Archive scraper
+    │   └── zenodo.py            # Zenodo REST API crawler
     │
     └── fetchers/
-        ├── base.py              # fetch_dataverse_dataset — handles all Dataverse repos
-        ├── zenodo.py            # Zenodo REST API
-        ├── dryad.py             # Dryad OAuth2 + REST API
-        ├── osf.py               # OSF (Open Science Framework)
-        ├── figshare.py          # Figshare REST API
-        └── icpsr.py             # ICPSR REST API
+        ├── base.py              # Shared Dataverse dataset fetcher
+        └── zenodo.py            # Zenodo file metadata fetcher
 ```
 
 ---
 
-## Credentials
+## Requirements
 
-Credentials are read from environment variables. **Never hardcode secrets in
-source files.**
+- Python 3.9+
+- `requests`
+- `google-api-python-client`, `google-auth-httplib2`, `google-auth-oauthlib`
+  (only needed for Google Drive upload)
 
 ```bash
-# Dryad OAuth2 — obtain at https://datadryad.org/stash/developer
-export DRYAD_CLIENT_ID="your-application-id"
-export DRYAD_CLIENT_SECRET="your-client-secret"
+# Create and activate virtual environment
+python3 -m venv env
+source env/bin/activate          # macOS / Linux
+# env\Scripts\activate           # Windows
 
-# Syracuse QDR API token
-export QDR_TOKEN="your-qdr-api-token"
+# Install dependencies
+pip install requests google-api-python-client google-auth-httplib2 google-auth-oauthlib
 ```
-
-Add these to your `~/.bashrc` or `~/.zshrc` for persistence, or use a
-`.env` file with a tool like [`direnv`](https://direnv.net/) (the `.env`
-file is git-ignored by default).
-
-> **Dryad token rotation:** The pipeline automatically refreshes the OAuth
-> token every 10 hours using the `client_credentials` grant. Long overnight
-> runs will never hit an expired-token error.
 
 ---
 
-## Usage
+## Configuration
+
+### 1. No credentials needed for basic crawling
+
+Zenodo and Harvard Dataverse are public APIs — no API key is required for
+metadata-only crawls.
+
+### 2. Google Drive upload (optional)
+
+To upload downloaded files to Google Drive you need a Google Cloud OAuth 2.0
+credential file:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) → APIs &
+   Services → Credentials.
+2. Create an **OAuth 2.0 Client ID** (Desktop app type).
+3. Download the JSON file and save it as `credentials.json` in the project root.
+4. On first run with `--gdrive`, your browser will open for authentication.
+   After you approve, a `token.pickle` file is saved automatically.
+
+> **Important:** `credentials.json` and `token.pickle` are listed in
+> `.gitignore` and must **never** be committed to the repository.
+
+---
+
+## Running the Pipeline
 
 ```bash
-# Activate the virtualenv first
+# Always activate the virtualenv first
 source env/bin/activate
+```
 
-# Metadata scan only — no files downloaded (fast, default behaviour)
+### Metadata-only scan (no files downloaded)
+
+```bash
+# All sources — Zenodo + Harvard + Harvard-OAI + Columbia
 python qdarchive_pipeline.py
 
-# Full download from all repositories
-python qdarchive_pipeline.py --download
+# Zenodo only
+python qdarchive_pipeline.py --sources zenodo
 
-# Specific repositories only
-python qdarchive_pipeline.py --sources zenodo dryad
+# Harvard Dataverse only (search-based crawler)
+python qdarchive_pipeline.py --sources harvard
 
-# Metadata scan with a higher record limit
-python qdarchive_pipeline.py --sources zenodo --max-records 2000
+# Harvard OAI-PMH full harvest
+python qdarchive_pipeline.py --sources harvard-oai
 
-# Full download with custom paths
-python qdarchive_pipeline.py \
-    --download \
-    --output-dir /data/qdarchive/files \
-    --db        /data/qdarchive/metadata.sqlite
+# Columbia Oral History Archive
+python qdarchive_pipeline.py --sources columbia
 
-# Resume an interrupted run — just re-run the same command
-# (metadata.progress.json tracks pagination state)
-# To force a full re-crawl:
-rm metadata.progress.json && python qdarchive_pipeline.py
+# Custom database path
+python qdarchive_pipeline.py --db 23692652-sq26.db
 ```
 
-### CLI options
+### Download files to disk
+
+```bash
+# Download everything to ./archive/
+python qdarchive_pipeline.py --download
+
+# Download only QDA analysis files (.qdpx, .nvp, .mx24 …)
+python qdarchive_pipeline.py --download --extensions .qdpx .nvp .nvpx .mx24
+
+# Limit file size (skip files > 200 MB)
+python qdarchive_pipeline.py --download --max-file-size 200MB
+
+# Zenodo only, with file download, custom output directory
+python qdarchive_pipeline.py \
+    --sources zenodo \
+    --download \
+    --output-dir /data/qdarchive/files \
+    --db 23692652-sq26.db
+```
+
+### Google Drive upload
+
+```bash
+# Download files and upload to Google Drive (keep local copies)
+python qdarchive_pipeline.py --download --gdrive
+
+# Download, upload to Google Drive, then delete local copies
+python qdarchive_pipeline.py --download --gdrive-only
+
+# Specific sources with Drive upload
+python qdarchive_pipeline.py --sources zenodo harvard --download --gdrive
+```
+
+### Resuming an interrupted run
+
+The pipeline saves pagination state to a `*.progress.json` file automatically.
+Just re-run the same command to continue from where it stopped:
+
+```bash
+python qdarchive_pipeline.py --sources zenodo
+# interrupted … re-run the same command:
+python qdarchive_pipeline.py --sources zenodo
+```
+
+To force a full re-crawl from the beginning:
+
+```bash
+rm metadata.*.progress.json
+python qdarchive_pipeline.py
+```
+
+### Continuous run wrapper
+
+For long overnight runs that should auto-restart on crash:
+
+```bash
+bash run_until_done.sh
+```
+
+---
+
+## CLI Reference
 
 | Flag | Default | Description |
 |---|---|---|
-| `--output-dir` | `./archive` | Root directory for downloaded files |
+| `--sources` | all | Which repos to crawl: `zenodo` `harvard` `harvard-oai` `columbia` |
 | `--db` | `./metadata.sqlite` | SQLite database path |
-| `--max-records` | `500` | Max analysis-file records per repository |
+| `--output-dir` | `./archive` | Root directory for downloaded files |
 | `--download` | off | Download files to disk |
-| `--sources` | all | Repositories to crawl (space-separated) |
-| `--dryad-client-id` | env | Dryad OAuth client ID |
-| `--dryad-client-secret` | env | Dryad OAuth client secret |
+| `--extensions` | all | Whitelist of file extensions to download (e.g. `.qdpx .nvp`) |
+| `--max-records` | 0 (unlimited) | Max projects to collect per source |
+| `--max-file-size` | unlimited | Skip files larger than this (e.g. `200MB`, `512KB`) |
+| `--gdrive` | off | Upload downloaded files to Google Drive (keeps local copies) |
+| `--gdrive-only` | off | Upload to Google Drive and delete local files after upload |
 
 ---
 
-## Database Schema — `metadata.sqlite`
+## Database Schema — `23692652-sq26.db`
 
-The database contains a single table `files`. Each row represents **one file**
-within a dataset. A dataset with five files produces five rows sharing the same
-`doi`, `title`, and `author` but with distinct `url`, `local_filename`, and
-`file_type`.
+The database uses a normalised five-table schema. Each **project** (dataset)
+has a single row in `projects`; its keywords, authors, licenses, and file list
+are in the four related tables.
 
-### Identity
+### `projects`
 
-| Column | Type | Required | Description |
-|---|---|:---:|---|
-| `id` | INTEGER | ✓ | Auto-incrementing primary key |
-| `url` | TEXT | ✓ | Direct download URL — deduplication key |
-| `doi` | TEXT | | Persistent dataset identifier, e.g. `10.5281/zenodo.14523891` |
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | Auto-incrementing primary key |
+| `query_string` | TEXT | Search query that found this dataset |
+| `repository_id` | INTEGER | Source repo identifier |
+| `repository_url` | TEXT | Base URL of the repository |
+| `project_url` | TEXT | Dataset landing page URL |
+| `version` | TEXT | Dataset version string |
+| `title` | TEXT | Dataset title |
+| `description` | TEXT | Abstract / description |
+| `language` | TEXT | Content language |
+| `doi` | TEXT | Persistent DOI, e.g. `10.5281/zenodo.14523891` |
+| `upload_date` | TEXT | Date deposited |
+| `download_date` | TEXT | Date crawled |
+| `download_repository_folder` | TEXT | Top-level archive folder (e.g. `zenodo`) |
+| `download_project_folder` | TEXT | Project subfolder |
+| `download_version_folder` | TEXT | Version subfolder (if any) |
+| `download_method` | TEXT | How the dataset was retrieved |
+| `gdrive_folder_id` | TEXT | Google Drive folder ID (if uploaded) |
+| `gdrive_folder_url` | TEXT | Google Drive folder URL (if uploaded) |
 
-### File
+### `keywords`
 
-| Column | Type | Required | Description |
-|---|---|:---:|---|
-| `local_dir` | TEXT | ✓ | Relative folder path, e.g. `zenodo/14523891` |
-| `local_filename` | TEXT | ✓ | Filename, e.g. `main.qdpx` |
-| `file_type` | TEXT | ✓ | `analysis` \| `primary` \| `additional` |
-| `file_extension` | TEXT | ✓ | Lowercase extension, e.g. `.qdpx` |
-| `file_size_bytes` | INTEGER | | File size in bytes |
-| `checksum_md5` | TEXT | | MD5 hex digest — empty until downloaded |
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `project_id` | INTEGER FK → `projects.id` | |
+| `keyword` | TEXT | One keyword per row |
 
-### Download
+### `person_role`
 
-| Column | Type | Required | Description |
-|---|---|:---:|---|
-| `download_timestamp` | TEXT | ✓ | ISO-8601 UTC timestamp — empty if not yet downloaded |
-| `source_name` | TEXT | ✓ | Repository name, e.g. `Zenodo` |
-| `source_url` | TEXT | | Dataset landing page URL |
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `project_id` | INTEGER FK → `projects.id` | |
+| `name` | TEXT | Person's name |
+| `role` | TEXT | Role (e.g. `author`, `uploader`) |
 
-### Dataset
+### `licenses`
 
-| Column | Type | Required | Description |
-|---|---|:---:|---|
-| `title` | TEXT | | Dataset title |
-| `description` | TEXT | | Abstract, truncated to 500 characters |
-| `year` | TEXT | | Publication year (YYYY) |
-| `keywords` | TEXT | | Semicolon-separated keywords |
-| `language` | TEXT | | Language of the dataset content |
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `project_id` | INTEGER FK → `projects.id` | |
+| `license` | TEXT | License identifier (e.g. `CC0-1.0`) |
 
-### People
+### `project_files`
 
-| Column | Type | Required | Description |
-|---|---|:---:|---|
-| `author` | TEXT | | Semicolon-separated credited author names |
-| `uploader_name` | TEXT | | Name of the depositor |
-| `uploader_email` | TEXT | | Contact email of the depositor |
-
-### Legal
-
-| Column | Type | Required | Description |
-|---|---|:---:|---|
-| `license` | TEXT | | SPDX identifier or short name, e.g. `CC0-1.0` |
-| `license_url` | TEXT | | URL to full license text |
-
-### Discovery
-
-| Column | Type | Required | Description |
-|---|---|:---:|---|
-| `matched_query` | TEXT | | The search query that surfaced this dataset |
-
-**Indexes** created automatically: `idx_url`, `idx_doi`, `idx_file_type`,
-`idx_source`, `idx_matched_query`.
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `project_id` | INTEGER FK → `projects.id` | |
+| `file_name` | TEXT | Filename |
+| `file_type` | TEXT | `analysis` \| `primary` \| `additional` |
+| `file_size_bytes` | INTEGER | File size in bytes |
+| `status` | TEXT | Download status (e.g. `SUCCEEDED`, `PENDING`) |
+| `gdrive_file_id` | TEXT | Google Drive file ID (if uploaded) |
+| `gdrive_url` | TEXT | Google Drive file URL (if uploaded) |
 
 ---
 
@@ -216,83 +293,97 @@ within a dataset. A dataset with five files produces five rows sharing the same
 
 Files are classified by extension at crawl time:
 
-| Type | Examples | Meaning |
+| Type | Extensions | Meaning |
 |---|---|---|
-| `analysis` | `.qdpx` `.nvp` `.nvpx` `.mx24` `.atlasproj` `.mqda` | QDA project files — primary archive target |
-| `primary` | `.pdf` `.docx` `.mp3` `.mp4` `.txt` `.csv` | Source data: transcripts, recordings, documents |
+| `analysis` | `.qdpx` `.nvp` `.nvpx` `.mx24` `.mx22` `.atlasproj` `.mqda` … | QDA project files — primary archive target |
+| `primary` | `.pdf` `.docx` `.mp3` `.mp4` `.txt` `.csv` … | Source data: transcripts, recordings, documents |
 | `additional` | `.png` `.zip` `.md` *(everything else)* | Supporting files: READMEs, codebooks, images |
 
 ---
 
 ## Search Query Strategy
 
-Queries are applied in three tiers across all repositories. The
-`matched_query` column records which query found each dataset.
+Queries are applied in tiers across all repositories. The `query_string` column
+in `projects` records which query found each dataset.
 
-| Tier | Examples | Strategy |
+| Tier | Examples | Goal |
 |---|---|---|
-| 1 — Extensions | `.qdpx` `.nvp` `.mx24` | Highest precision |
-| 2 — Software names | `NVivo` `MAXQDA` `ATLAS.ti` | High precision |
+| 1 — File extensions | `.qdpx` `.nvp` `.mx24` | Highest precision — matches exact files |
+| 2 — Software names | `NVivo` `MAXQDA` `ATLAS.ti` `Dedoose` | High precision |
 | 3 — Methodology | `interview transcripts` `thematic analysis` | High recall |
+| 4–9 | Data collection methods, discipline terms, German/French/Spanish terms | Broad coverage |
 
 ---
 
-## Output
-
-### File hierarchy — `./archive/`
-
-```
-archive/
-  zenodo/
-    {record_id}/
-      main.qdpx
-      interview_01.docx
-  dryad/
-    {doi_safe}/
-      data.nvp
-  syracuse_qdr/  dataverse_no/  dans/  harvard_dataverse/
-    ...
-```
-
-### Runtime files
-
-| File | Description |
-|---|---|
-| `metadata.sqlite` | SQLite database (git-ignored) |
-| `metadata.progress.json` | Resume state for interrupted runs (git-ignored) |
-| `pipeline.log` | Full execution log (git-ignored) |
-
----
-
-## Useful Queries
+## Useful SQL Queries
 
 ```sql
+-- Total projects per repository
+SELECT repository_url, COUNT(*) AS projects
+FROM   projects
+GROUP  BY repository_url;
+
 -- All QDA analysis files
-SELECT local_dir, local_filename, source_name, title
-FROM   files
-WHERE  file_type = 'analysis'
-ORDER  BY source_name;
+SELECT p.title, p.doi, pf.file_name, pf.file_type, pf.gdrive_url
+FROM   projects p
+JOIN   project_files pf ON pf.project_id = p.id
+WHERE  pf.file_type = 'analysis'
+ORDER  BY p.repository_url, p.title;
+
+-- Projects with Google Drive links
+SELECT title, doi, gdrive_folder_url
+FROM   projects
+WHERE  gdrive_folder_id IS NOT NULL
+ORDER  BY repository_url;
 
 -- Storage usage by repository
-SELECT source_name,
-       COUNT(*)                              AS files,
-       ROUND(SUM(file_size_bytes) / 1e6, 1) AS total_mb
-FROM   files
-GROUP  BY source_name;
-
--- Files not yet downloaded
-SELECT doi, title, url
-FROM   files
-WHERE  file_type = 'analysis'
-  AND  download_timestamp = '';
+SELECT p.repository_url,
+       COUNT(DISTINCT p.id)            AS projects,
+       COUNT(pf.id)                    AS files,
+       ROUND(SUM(pf.file_size_bytes) / 1e9, 2) AS total_gb
+FROM   projects p
+JOIN   project_files pf ON pf.project_id = p.id
+GROUP  BY p.repository_url;
 
 -- Most productive search queries
-SELECT matched_query,
-       SUM(file_type = 'analysis') AS analysis_files
-FROM   files
-GROUP  BY matched_query
-ORDER  BY analysis_files DESC;
+SELECT query_string, COUNT(*) AS projects
+FROM   projects
+GROUP  BY query_string
+ORDER  BY projects DESC
+LIMIT  20;
+
+-- Authors with the most deposited datasets
+SELECT pr.name, COUNT(DISTINCT pr.project_id) AS datasets
+FROM   person_role pr
+WHERE  pr.role = 'author'
+GROUP  BY pr.name
+ORDER  BY datasets DESC
+LIMIT  20;
+
+-- License distribution
+SELECT l.license, COUNT(*) AS count
+FROM   licenses l
+GROUP  BY l.license
+ORDER  BY count DESC;
 ```
+
+---
+
+## Files Ignored by Git
+
+The following files are listed in `.gitignore` and are **not** committed:
+
+| File / Pattern | Reason |
+|---|---|
+| `credentials.json` | Google OAuth client secret — never share |
+| `token.pickle` | Google OAuth access token — never share |
+| `*.progress.json` | Pipeline resume state — ephemeral |
+| `pipeline.log` | Runtime log — ephemeral |
+| `env/` | Python virtual environment |
+| `.env` | Environment variable overrides |
+
+The database `23692652-sq26.db` is committed via **Git LFS** (see
+`.gitattributes`).
 
 ---
 
@@ -300,8 +391,8 @@ ORDER  BY analysis_files DESC;
 
 This pipeline code is developed for research purposes at FAU Erlangen-Nürnberg.
 The downloaded datasets retain their original licenses as recorded in the
-`license` column of the database.
+`licenses` table of the database.
 
 ---
 
-*FAU Erlangen-Nürnberg · Open Science Software Lab · 2026*
+*FAU Erlangen-Nürnberg · QDArchive Project · 2026*

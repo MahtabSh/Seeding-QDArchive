@@ -50,6 +50,11 @@ def crawl_zenodo(
     max_records: int = 0,
     progress: ProgressState = None,
     download: bool = False,
+    allowed_extensions: set[str] | None = None,
+    max_file_size_bytes: int | None = None,
+    gdrive_service=None,
+    gdrive_folder_cache: dict | None = None,
+    gdrive_root_id: str | None = None,
 ):
     mode = "DOWNLOAD" if download else "METADATA ONLY"
     log.info(f"=== Zenodo [{mode}] ===")
@@ -152,7 +157,14 @@ def crawl_zenodo(
                     "_record":      record,   # full search result, used as fast path
                 }
 
-                fetch_zenodo(global_id, item, output_dir, db, seen_urls, download, q_str)
+                fetch_zenodo(
+                    global_id, item, output_dir, db, seen_urls, download, q_str,
+                    allowed_extensions=allowed_extensions,
+                    max_file_size_bytes=max_file_size_bytes,
+                    gdrive_service=gdrive_service,
+                    gdrive_folder_cache=gdrive_folder_cache,
+                    gdrive_root_id=gdrive_root_id,
+                )
                 total += 1
                 human_delay(1.0, 3.5, "between records")
 
