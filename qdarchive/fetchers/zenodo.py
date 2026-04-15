@@ -22,7 +22,14 @@ ZENODO_REPO_URL = "https://zenodo.org"
 log = logging.getLogger(__name__)
 
 
-def fetch_zenodo(global_id, item, output_dir, db, seen_urls, download, q):
+def fetch_zenodo(
+    global_id, item, output_dir, db, seen_urls, download, q,
+    allowed_extensions: set[str] | None = None,
+    max_file_size_bytes: int | None = None,
+    gdrive_service=None,
+    gdrive_folder_cache: dict | None = None,
+    gdrive_root_id: str | None = None,
+):
     record_id  = global_id.replace("doi:", "").split("zenodo.")[-1].split(".")[0]
     doi        = f"https://doi.org/{global_id.replace('doi:', '')}"
     source_url = f"https://zenodo.org/records/{record_id}"
@@ -108,7 +115,7 @@ def fetch_zenodo(global_id, item, output_dir, db, seen_urls, download, q):
             "download_timestamp": "",
             "access_note": note,
         })
-        db.insert_project_file(proj_id, "", "", "NO_FILES")
+        # No project_file row — absence of rows signals no files available
         return
 
     log.info(f"Zenodo: record {record_id} — {len(files)} file(s)")
@@ -123,23 +130,99 @@ def fetch_zenodo(global_id, item, output_dir, db, seen_urls, download, q):
         if not furl:
             continue
 
-        checksum = ""
-        ts = ""
+        # ── Extension and size filters ────────────────────────────────────────
+        if download:
+            if allowed_extensions and fext not in allowed_extensions:
+                _insert_file_row(db, seen_urls, {
+                    **common, "url": furl, "local_dir": "", "local_filename": fname,
+                    "file_type": ftype, "file_extension": fext,
+                    "file_size_bytes": fsize, "checksum_md5": "",
+                    "download_timestamp": "", "access_note": "extension filtered",
+                })
+                db.insert_project_file(proj_id, fname, fext, "SUCCEEDED", file_size_bytes=fsize)
+                continue
+            if max_file_size_bytes and fsize and fsize > max_file_size_bytes:
+                log.info(f"Zenodo: skipping {fname} ({fsize:,} bytes > limit)")
+                _insert_file_row(db, seen_urls, {
+                    **common, "url": furl, "local_dir": "", "local_filename": fname,
+                    "file_type": ftype, "file_extension": fext,
+                    "file_size_bytes": fsize, "checksum_md5": "",
+                    "download_timestamp": "", "access_note": "file too large",
+                })
+                db.insert_project_file(proj_id, fname, fext, "FAILED_TOO_LARGE", file_size_bytes=fsize)
+                continue
+
+        checksum   = ""
+        ts         = ""
+        gdrive_id  = None
+        gdrive_url = ""
+        saved_local_dir  = local_dir
+        saved_local_name = fname
 
         if download:
-            dest = output_dir / "zenodo" / safe_id / fname
-            if download_file(furl, dest):
-                checksum = md5(dest)
-                ts = datetime.now(timezone.utc).isoformat()
-            time.sleep(1)
+            if gdrive_service and gdrive_root_id:
+                # Skip Drive API entirely if this file was already uploaded in a previous run
+                _already = db.conn.execute(
+                    "SELECT gdrive_file_id FROM files "
+                    "WHERE url=? AND gdrive_file_id IS NOT NULL AND gdrive_file_id != ''",
+                    (furl,)
+                ).fetchone()
+                if _already:
+                    log.debug(f"Zenodo: '{fname}' already on Drive ({_already[0]}) — skipping")
+                    continue
+                # ── Stream directly to Google Drive — no local disk write ──────
+                from qdarchive.gdrive import _get_or_create_folder, file_url, folder_url, make_public, stream_url_to_drive
+                cache = gdrive_folder_cache if gdrive_folder_cache is not None else {}
+                # repo folder
+                repo_key = "/zenodo"
+                if repo_key not in cache:
+                    cache[repo_key] = _get_or_create_folder(gdrive_service, "zenodo", gdrive_root_id)
+                repo_folder_id = cache[repo_key]
+                # project folder
+                proj_key = f"/zenodo/{safe_id}"
+                if proj_key not in cache:
+                    fid = _get_or_create_folder(gdrive_service, safe_id, repo_folder_id)
+                    make_public(gdrive_service, fid)
+                    cache[proj_key] = fid
+                proj_folder_id = cache[proj_key]
+
+                gdrive_id = stream_url_to_drive(gdrive_service, furl, fname, proj_folder_id)
+                if gdrive_id:
+                    gdrive_url       = file_url(gdrive_id)
+                    ts               = datetime.now(timezone.utc).isoformat()
+                    saved_local_dir  = ""   # not saved locally
+                    saved_local_name = ""
+                    proj_folder_url  = folder_url(proj_folder_id)
+                    db.conn.execute("""
+                        UPDATE projects SET gdrive_folder_id=?, gdrive_folder_url=?
+                        WHERE download_project_folder=?
+                          AND (gdrive_folder_id IS NULL OR gdrive_folder_id='')
+                    """, (proj_folder_id, proj_folder_url, safe_id))
+                else:
+                    log.warning(f"Zenodo: Drive upload failed for '{fname}' after 3 attempts — metadata saved, file skipped")
+                time.sleep(0.5)
+            else:
+                # ── Normal download to local disk ─────────────────────────────
+                dest = output_dir / "zenodo" / safe_id / fname
+                if download_file(furl, dest):
+                    checksum = md5(dest)
+                    ts = datetime.now(timezone.utc).isoformat()
+                time.sleep(1)
 
         _insert_file_row(db, seen_urls, {
             **common,
             "url": furl,
-            "local_dir": local_dir,
-            "local_filename": fname, "file_type": ftype,
+            "local_dir": saved_local_dir,
+            "local_filename": saved_local_name, "file_type": ftype,
             "file_extension": fext, "file_size_bytes": fsize,
             "checksum_md5": checksum, "download_timestamp": ts,
+            "gdrive_file_id": gdrive_id or "",
+            "gdrive_url": gdrive_url,
             "access_note": "",
         })
-        db.insert_project_file(proj_id, fname, fext, "SUCCEEDED")
+        pf_id = db.insert_project_file(proj_id, fname, fext, "SUCCEEDED", file_size_bytes=fsize)
+        if gdrive_id:
+            db.conn.execute(
+                "UPDATE project_files SET gdrive_file_id=?, gdrive_url=? WHERE id=?",
+                (gdrive_id, gdrive_url, pf_id),
+            )

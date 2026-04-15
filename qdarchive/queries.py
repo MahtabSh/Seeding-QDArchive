@@ -21,6 +21,8 @@ QDA_EXTENSION_QUERIES: list[str] = [
     ".atlasproj", ".hpr7",                         # ATLAS.ti
     ".ppj",   ".pprj",  ".qlt",                    # QDA Miner / other
     ".f4p",   ".qpd",                              # f4analyse / other
+    ".rqda",                                       # RQDA (R package)
+    ".tns",                                        # Transana (video QDA)
 ]
 
 # ── Tier 2: QDA software names ────────────────────────────────────────────────
@@ -34,11 +36,15 @@ QDA_SOFTWARE_QUERIES: list[str] = [
     "Quirkos",
     "CAQDAS",
     "REFI-QDA",
+    "Transana",          # video/audio qualitative analysis
+    "Taguette",          # open-source QDAS
+    "RQDA",              # R-based QDA package
+    "MaxQDA",            # alternate spelling used in some deposits
 ]
 
 # ── Tier 3–9: methodology / discipline / archiving / language keywords ─────────
 QDA_KEYWORD_QUERIES: list[str] = [
-    # "oral history",
+    "oral history",
     "ethnographic data",
     "field notes qualitative",
     "coding qualitative",
@@ -58,15 +64,23 @@ QDA_KEYWORD_QUERIES: list[str] = [
     "in-depth interviews",
     "narrative inquiry",
     "life history interviews",
+    "oral history interview",
+    "oral history collection",
+    "oral history transcript",
     "biographical interviews",
     "expert interviews",
+    "key informant interview",
     "participant observation",
     "ethnographic fieldwork",
     "discourse analysis data",
     "conversation analysis data",
     "content analysis qualitative",
     "photovoice",
+    "photo elicitation",
     "diary studies qualitative",
+    "think-aloud protocol",
+    "think-aloud data",
+    "participatory research data",
 
     # ── Tier 5: transcripts and raw data ──────────────────────────────────────
     "interview transcript",
@@ -77,6 +91,14 @@ QDA_KEYWORD_QUERIES: list[str] = [
     "research transcript",
     "focus group data",
     "group interview data",
+    "narrative data",
+    "qualitative codebook",
+    "coding scheme qualitative",
+    "open coding",
+    "axial coding",
+    "constant comparative",
+    "data saturation",
+    "member checking",
 
     # ── Tier 6: discipline-specific qualitative data ───────────────────────────
     "qualitative health research",
@@ -102,6 +124,9 @@ QDA_KEYWORD_QUERIES: list[str] = [
     "UKDA qualitative",
     "Qualidata",
     "CESSDA qualitative",
+    "Qualiservice",              # German qualitative data archive
+    "DANS qualitative",          # Dutch data archive
+    "qualitative data deposit",
     "data replication qualitative",
 
     # ── Tier 8: mixed-methods (qualitative component) ─────────────────────────
@@ -112,10 +137,20 @@ QDA_KEYWORD_QUERIES: list[str] = [
 
     # ── Tier 9: language-specific ─────────────────────────────────────────────
     "qualitative Forschung",        # German: qualitative research
+    "qualitative Forschungsdaten",  # German: qualitative research data
     "Interviewdaten",               # German: interview data
+    "Interview-Transkript",         # German: interview transcript
     "Leitfadeninterview",           # German: semi-structured interview
+    "Feldnotizen",                  # German: field notes
+    "Fokusgruppe",                  # German: focus group
     "données qualitatives",         # French: qualitative data
+    "données d'entretien",          # French: interview data
     "entretiens qualitatifs",       # French: qualitative interviews
     "investigación cualitativa",    # Spanish: qualitative research
+    "entrevistas cualitativas",     # Spanish: qualitative interviews
     "pesquisa qualitativa",         # Portuguese: qualitative research
+    "dados qualitativos",           # Portuguese: qualitative data
+    "ricerca qualitativa",          # Italian: qualitative research
+    "dati qualitativi",             # Italian: qualitative data
+    "kwalitatief onderzoek",        # Dutch: qualitative research
 ]

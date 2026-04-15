@@ -80,6 +80,11 @@ def crawl_columbia(
     max_records: int = 100_000,
     progress: ProgressState = None,
     download: bool = False,
+    allowed_extensions: set[str] | None = None,
+    max_file_size_bytes: int | None = None,
+    gdrive_service=None,
+    gdrive_folder_cache: dict | None = None,
+    gdrive_root_id: str | None = None,
 ):
     mode = "DOWNLOAD" if download else "METADATA ONLY"
     log.info(f"=== Columbia Oral History Archive  [{mode}] ===")
@@ -221,11 +226,11 @@ def crawl_columbia(
                                     status = "SUCCEEDED" if ok else "FAILED_SERVER"
                                     time.sleep(0.5)
 
-                                db.insert_project_file(project_id, fname, fext, status)
+                                db.insert_project_file(project_id, fname, fext, status, file_size_bytes=None)
                                 files_written = True
 
             if not files_written:
-                db.insert_project_file(project_id, "", "", "FAILED_LOGIN")
+                db.insert_project_file(project_id, "", "", "FAILED_LOGIN", file_size_bytes=None)
 
             # ── Legacy `files` row ────────────────────────────────────────────
             _insert_file_row(db, seen_urls, {

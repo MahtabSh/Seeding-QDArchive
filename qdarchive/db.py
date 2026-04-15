@@ -4,12 +4,55 @@ SQLite database layer.
 Two schemas coexist:
   • Legacy `files` table  — flat, one row per file (v1, kept for compat)
   • Normalised v2 tables  — projects / project_files / keywords / person_role / licenses
+
+Enum constants
+--------------
+Use these instead of raw strings when inserting data, so typos are caught early.
+
+  DownloadResult.SUCCEEDED       — file downloaded successfully
+  DownloadResult.FAILED_SERVER   — server error (4xx/5xx, network failure)
+  DownloadResult.FAILED_LOGIN    — file is restricted / login required
+  DownloadResult.FAILED_TOO_LARGE — file exceeds the configured size limit
+
+  PersonRole.UPLOADER / AUTHOR / OWNER / OTHER / UNKNOWN
+
+  License.CC_BY / CC_BY_SA / CC_BY_NC / CC_BY_ND / CC_BY_NC_ND / CC0
+         / ODBL / ODC_BY / PDDL / ODBL_1_0 / ODC_BY_1_0
 """
 import json
 import logging
 import sqlite3
 import threading
 from pathlib import Path
+
+
+# ── Enum constants ────────────────────────────────────────────────────────────
+
+class DownloadResult:
+    SUCCEEDED        = "SUCCEEDED"
+    FAILED_SERVER    = "FAILED_SERVER"
+    FAILED_LOGIN     = "FAILED_LOGIN"
+    FAILED_TOO_LARGE = "FAILED_TOO_LARGE"
+
+class PersonRole:
+    UPLOADER = "UPLOADER"
+    AUTHOR   = "AUTHOR"
+    OWNER    = "OWNER"
+    OTHER    = "OTHER"
+    UNKNOWN  = "UNKNOWN"
+
+class License:
+    CC_BY         = "CC BY"
+    CC_BY_SA      = "CC BY-SA"
+    CC_BY_NC      = "CC BY-NC"
+    CC_BY_ND      = "CC BY-ND"
+    CC_BY_NC_ND   = "CC BY-NC-ND"
+    CC0           = "CC0"
+    ODBL          = "ODbL"
+    ODC_BY        = "ODC-By"
+    PDDL          = "PDDL"
+    ODBL_1_0      = "ODbL-1.0"
+    ODC_BY_1_0    = "ODC-By-1.0"
 
 log = logging.getLogger(__name__)
 
@@ -96,11 +139,12 @@ CREATE TABLE IF NOT EXISTS projects (
 
 _CREATE_PROJECT_FILES_TABLE = """
 CREATE TABLE IF NOT EXISTS project_files (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id  INTEGER NOT NULL REFERENCES projects(id),
-    file_name   TEXT    NOT NULL,
-    file_type   TEXT    NOT NULL,
-    status      TEXT    NOT NULL
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id       INTEGER NOT NULL REFERENCES projects(id),
+    file_name        TEXT    NOT NULL,
+    file_type        TEXT    NOT NULL,
+    file_size_bytes  INTEGER,
+    status           TEXT    NOT NULL
 );
 """
 
@@ -149,6 +193,7 @@ _COLUMNS = [
     "license", "license_url",
     "matched_query",
     "manual_download", "access_note",
+    "gdrive_file_id", "gdrive_url",
 ]
 
 
@@ -183,7 +228,7 @@ class MetadataDB:
             + _CREATE_LICENSES_TABLE
             + _CREATE_V2_INDEXES
         )
-        # Migrate existing databases
+        # Migrate existing databases — legacy files table
         for col, definition in [
             ("manual_download", "INTEGER DEFAULT 0"),
             ("access_note",     "TEXT"),
@@ -191,7 +236,17 @@ class MetadataDB:
             try:
                 self.conn.execute(f"ALTER TABLE files ADD COLUMN {col} {definition}")
                 self.conn.commit()
-                log.info(f"DB migration: added column '{col}'")
+                log.info(f"DB migration: added column '{col}' to files")
+            except Exception:
+                pass
+        # Migrate existing databases — project_files table
+        for col, definition in [
+            ("file_size_bytes", "INTEGER"),
+        ]:
+            try:
+                self.conn.execute(f"ALTER TABLE project_files ADD COLUMN {col} {definition}")
+                self.conn.commit()
+                log.info(f"DB migration: added column '{col}' to project_files")
             except Exception:
                 pass
         self.conn.commit()
@@ -298,13 +353,22 @@ class MetadataDB:
             self._tick()
             return cur.lastrowid
 
-    def insert_project_file(self, project_id: int, file_name: str, file_type: str, status: str):
+    def insert_project_file(
+        self,
+        project_id: int,
+        file_name: str,
+        file_type: str,
+        status: str,
+        file_size_bytes: int | None = None,
+    ) -> int:
         with self._lock:
-            self.conn.execute(
-                "INSERT INTO project_files (project_id, file_name, file_type, status) VALUES (?, ?, ?, ?)",
-                (project_id, file_name, file_type, status),
+            cur = self.conn.execute(
+                "INSERT INTO project_files (project_id, file_name, file_type, file_size_bytes, status) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (project_id, file_name, file_type, file_size_bytes, status),
             )
             self._tick()
+            return cur.lastrowid
 
     def insert_keyword(self, project_id: int, keyword: str):
         with self._lock:

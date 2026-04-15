@@ -16,6 +16,17 @@ pipeline.log
 .env.*
 !.env.example
 
+# Google Drive API credentials and OAuth tokens — never commit these
+credentials.json
+token.pickle
+gdrive_upload.py
+
+# Old / working databases — only 23692652-sq26.db is the canonical output
+metadata.sqlite
+metadata.sqlite-shm
+metadata.sqlite-wal
+prev-schema/
+
 # ── Python ────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
