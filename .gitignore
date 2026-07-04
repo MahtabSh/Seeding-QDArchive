@@ -2,6 +2,13 @@
 # QDArchive — .gitignore
 # ─────────────────────────────────────────────────────────────
 
+# ── Database files (too large for git, managed separately) ────
+*.db
+*.db-shm
+*.db-wal
+# Submission DB tracked via git-lfs
+!23692652-sq26-classification.db
+
 # ── Pipeline outputs ──────────────────────────────────────────
 # Resume/progress state (e.g. classify_isic.progress.json.mistral)
 *.progress.json
@@ -57,6 +64,9 @@ metadata.sqlite
 metadata.sqlite-shm
 metadata.sqlite-wal
 prev-schema/
+
+# Fine-tuned model weights (large binaries, not tracked in git)
+models/
 
 # ── Python ────────────────────────────────────────────────────
 __pycache__/

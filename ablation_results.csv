@@ -1,0 +1,5 @@
+round,classifiers,added,very_high_pct,high_pct,medium_pct,low_pct,div_coverage_pct,section_changed,section_changed_pct,division_changed,division_changed_pct,conf_upgrades
+1,ensemble,ensemble,0.0,0.0,0.0,100.0,27.69,0,0.0,0,0.0,0
+2,ensemble+bert_base,bert_base,0.0,0.0,78.42,21.58,27.69,0,0.0,0,0.0,41625
+3,ensemble+bert_base+bert_div,bert_div,0.0,46.47,46.69,6.84,64.37,5520,10.4,20573,38.76,32488
+4,ensemble+bert_base+bert_div+tfidf,tfidf,26.1,31.91,38.49,3.5,64.81,1922,3.62,1485,2.8,21754
