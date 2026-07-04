@@ -1,29 +1,34 @@
 # QDArchive Seeding Pipeline
 
-Automated harvesting of qualitative research data (QDA project files and
+Automated harvesting and ISIC classification of qualitative research data (QDA project files and
 accompanying source materials) from open repositories. Part of the QDArchive
 project at **FAU Erlangen-Nürnberg**.
 
 ---
 
-## What Was Actually Collected
+## Overview
 
-This pipeline successfully retrieved data from **two repositories**:
+This project is divided into two parts:
 
-| Repository | Records Collected | Notes |
+| Part | Description |
+|---|---|
+| **Part 1 — Data Collection** | Crawl Zenodo, Harvard Dataverse, and Columbia to collect 53,080 research dataset projects |
+| **Part 2 — Classification** | Classify all projects by economic sector using ISIC Rev.5 via a 4-classifier ensemble |
+
+---
+
+## Part 1 — Data Collection
+
+### What Was Collected
+
+| Repository | Records | Notes |
 |---|---|---|
-| **Zenodo** | 39,405 projects | Full API crawl across all query tiers |
-| **Harvard Dataverse** | 13,650 projects | Search + OAI-PMH crawl |
-| Columbia Oral History Archive | 25 projects | Limited (scraper only) |
-
-The **Columbia** crawler is included but collects very few records because the
-Columbia Oral History Portal does not expose a public API — the crawler
-web-scrapes a limited listing page. For Zenodo and Harvard, both the metadata
-and (where applicable) Google Drive upload links are recorded.
+| **Zenodo** | 39,405 | Full API crawl across all query tiers |
+| **Harvard Dataverse** | 13,650 | Search + OAI-PMH crawl |
+| **Columbia Oral History Archive** | 25 | Scraper only (no public API) |
+| **Total** | **53,080** | |
 
 **Database file:** `23692652-sq26.db`
-
-**Total records in merged database:**
 
 | Table | Rows |
 |---|---|
@@ -31,7 +36,99 @@ and (where applicable) Google Drive upload links are recorded.
 | `keywords` | 203,849 |
 | `person_role` | 159,344 |
 | `licenses` | 49,603 |
-| `project_files` | 610,131 |
+| `files` | 610,131 |
+
+### Project Types
+
+Each project is typed based on its file contents:
+
+| Type | Description | Count |
+|---|---|---|
+| `QD_PROJECT` | Qualitative data files (interviews, transcripts, surveys) | 35,289 |
+| `OTHER_PROJECT` | Research datasets of other kinds | 15,915 |
+| `NOT_A_PROJECT` | Entries that do not represent meaningful research datasets | 1,809 |
+| `QDA_PROJECT` | Contains QDA software project files (.qdpx, .nvpx, .atlproj, .mx22) | 67 |
+
+---
+
+## Part 2 — ISIC Rev.5 Classification
+
+All 53,080 projects were classified according to the **ISIC Rev.5** standard (International Standard Industrial Classification of All Economic Activities, Revision 5 — United Nations 2025).
+
+Each project received:
+- A **primary class** — ISIC section (one of 22 letters A–V)
+- A **secondary class** — ISIC division (one of 88 two-digit codes)
+- A **confidence score** derived from classifier agreement
+
+### Classification Pipeline
+
+A 4-classifier voting ensemble was used. Each classifier contributes an independent signal; the final label is the majority vote with priority tiebreaking.
+
+| Step | Script | Algorithm | Output Table | Provides Division? |
+|---|---|---|---|---|
+| 1 | `classify_combined.py` | LLM prompt — Qwen2.5:7b / Mistral / Claude Haiku | `classifications_combined` | Yes |
+| 2 | `create_training_labels.py` | Silver label extraction + class balancing | `labels_training` | — |
+| 3 | `classify_bert.py` | bert-base-uncased fine-tuned on labels_training | `classifications_bert_base` | No |
+| 4 | `classify_bert_division.py` | DistilBERT + ISIC PDF anchors (section + division) | `classifications_bert_division` | Yes (100%) |
+| 5 | `classify_tfidf.py` | TF-IDF + Logistic Regression | `classifications_tfidf` | No |
+| 6 | `classify_vote.py` | Majority vote with priority tiebreak + division fill | `classifications_vote` | Yes (100%) |
+| 7 | `classify_files_bert.py` | bert_base_isic_v1 on individual file text snippets | `classifications_files` | No |
+
+### Results Summary
+
+**Project-level (53,080 projects — 100% coverage):**
+
+| Confidence | Projects | % |
+|---|---|---|
+| very_high (4/4 agree) | 23,058 | 43.4% |
+| high (3/4 agree) | 19,361 | 36.5% |
+| medium (2/4 agree) | 9,871 | 18.6% |
+| low (1/4 agree) | 790 | 1.5% |
+
+**File-level (2,787 files — QDA + QD projects in Harvard Dataverse):**
+
+| Confidence | Files | % |
+|---|---|---|
+| very_high | 1,886 | 67.7% |
+| high | 452 | 16.2% |
+| medium | 358 | 12.8% |
+| low | 91 | 3.3% |
+
+### Per-Repository Dominant ISIC Sections
+
+| Repo | Name | #1 Section | #2 Section | #3 Section |
+|---|---|---|---|---|
+| 1 | Zenodo | N — Professional/scientific | A — Agriculture | Q — Education |
+| 10 | Harvard Dataverse | P — Public administration | N — Professional/scientific | R — Human health |
+| 19 | Columbia | R — Human health | N — Professional/scientific | Q — Education |
+
+### Submission Deliverables
+
+| File | Description |
+|---|---|
+| `23692652-sq26-classification.xlsx` | All 53,080 projects with primary + secondary class |
+| `23692652-sq26-classification.db` | Full SQLite database with all classification tables |
+| `23692652-sq26-classification-methodology.*` | Methodology report (md / docx / pdf) — local only |
+| `23692652-sq26-report-repo{1,10,19}.*` | Per-repository reports (docx / pdf) — local only |
+
+### Classification Scripts
+
+| Script | Purpose |
+|---|---|
+| `classify_combined.py` | Run LLM classification (Qwen / Mistral / Claude) |
+| `classify_bert.py` | Fine-tune and run bert-base-uncased |
+| `classify_bert_division.py` | Fine-tune and run DistilBERT with division labels |
+| `classify_tfidf.py` | Train and run TF-IDF + Logistic Regression |
+| `classify_vote.py` | Combine votes into final classification |
+| `classify_files_bert.py` | Per-file BERT classification using file snippets |
+| `create_training_labels.py` | Build silver training labels from LLM results |
+| `enrich_projects.py` | Add keyword and filename enrichment to project text |
+| `retrain_all.sh` | Re-run full classifier training pipeline end-to-end |
+| `generate_xlsx.py` | Export classification results to Excel |
+| `generate_pdf_report.py` | Generate per-repo PDF reports |
+| `generate_docx_report.py` | Generate per-repo Word reports |
+| `build_docx.py` | Convert methodology markdown to Word |
+| `build_pdf_doc.py` | Convert methodology markdown to PDF |
 
 ---
 
@@ -39,351 +136,180 @@ and (where applicable) Google Drive upload links are recorded.
 
 ```
 Seeding-QDArchive/
-├── 23692652-sq26.db             # Main SQLite database (tracked via Git LFS)
-├── qdarchive_pipeline.py        # Entry-point — delegates to the qdarchive package
-├── run_until_done.sh            # Shell wrapper to auto-restart on exit
-├── merge_databases.py           # One-time script to merge old + new databases
-├── README.md
-├── .gitignore
-├── .gitattributes               # Git LFS configuration
+├── 23692652-sq26-classification.db   # Submission DB — all classification tables (Git LFS)
+├── 23692652-sq26-classification.xlsx # Submission spreadsheet
 │
-├── archive/                     # Downloaded files (not committed)
+├── classify_*.py                     # Classifier scripts (Part 2)
+├── create_training_labels.py         # Silver label builder
+├── enrich_projects.py                # Text enrichment
+├── retrain_all.sh                    # Full retrain pipeline
+├── generate_*.py / build_*.py        # Report generators
 │
-└── qdarchive/                   # Core package
-    ├── pipeline.py              # CLI argument parsing and orchestration
-    ├── db.py                    # MetadataDB — SQLite wrapper with WAL mode
-    ├── queries.py               # QDA_QUERIES and QDA_EXTENSION_QUERIES
-    ├── progress.py              # Resume-state serialisation (*.progress.json)
-    ├── utils.py                 # File classification, path helpers
-    ├── gdrive.py                # Google Drive upload integration
-    │
+├── qdarchive_pipeline.py             # Entry-point — data collection (Part 1)
+├── run_until_done.sh                 # Auto-restart wrapper
+├── merge_databases.py                # One-time DB merge utility
+│
+├── models/                           # Fine-tuned model weights (not tracked in git)
+│   ├── bert_base_isic_v1/            # bert-base-uncased fine-tuned on ISIC sections
+│   └── bert_division_isic_v1/        # DistilBERT fine-tuned on ISIC sections + divisions
+│
+└── qdarchive/                        # Core package (Part 1)
+    ├── pipeline.py
+    ├── db.py
+    ├── queries.py
+    ├── ensemble_classifier.py        # LLM-based classifier
+    ├── isic_enriched.py              # ISIC Rev.5 division metadata
+    ├── nli_classifier.py             # NLI zero-shot classifier
     ├── crawlers/
-    │   ├── __init__.py          # Source registry (CRAWLERS dict)
-    │   ├── harvard.py           # Harvard Dataverse search loop
-    │   ├── harvard_oai.py       # OAI-PMH crawler for Harvard Dataverse
-    │   ├── columbia.py          # Columbia Oral History Archive scraper
-    │   └── zenodo.py            # Zenodo REST API crawler
-    │
+    │   ├── zenodo.py
+    │   ├── harvard.py
+    │   ├── harvard_oai.py
+    │   └── columbia.py
     └── fetchers/
-        ├── base.py              # Shared Dataverse dataset fetcher
-        └── zenodo.py            # Zenodo file metadata fetcher
+        ├── base.py
+        └── zenodo.py
 ```
 
 ---
 
 ## Requirements
 
-- Python 3.9+
-- `requests`
-- `google-api-python-client`, `google-auth-httplib2`, `google-auth-oauthlib`
-  (only needed for Google Drive upload)
-
 ```bash
-# Create and activate virtual environment
 python3 -m venv env
-source env/bin/activate          # macOS / Linux
-# env\Scripts\activate           # Windows
-
-# Install dependencies
-pip install requests google-api-python-client google-auth-httplib2 google-auth-oauthlib
-```
-
----
-
-## Configuration
-
-### 1. No credentials needed for basic crawling
-
-Zenodo and Harvard Dataverse are public APIs — no API key is required for
-metadata-only crawls.
-
-### 2. Google Drive upload (optional)
-
-To upload downloaded files to Google Drive you need a Google Cloud OAuth 2.0
-credential file:
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) → APIs &
-   Services → Credentials.
-2. Create an **OAuth 2.0 Client ID** (Desktop app type).
-3. Download the JSON file and save it as `credentials.json` in the project root.
-4. On first run with `--gdrive`, your browser will open for authentication.
-   After you approve, a `token.pickle` file is saved automatically.
-
-> **Important:** `credentials.json` and `token.pickle` are listed in
-> `.gitignore` and must **never** be committed to the repository.
-
----
-
-## Running the Pipeline
-
-```bash
-# Always activate the virtualenv first
 source env/bin/activate
+
+# Part 1 — data collection
+pip install requests google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+# Part 2 — classification
+pip install transformers torch scikit-learn openpyxl python-docx matplotlib numpy
 ```
 
-### Metadata-only scan (no files downloaded)
+---
+
+## Running Part 1 — Data Collection
 
 ```bash
-# All sources — Zenodo + Harvard + Harvard-OAI + Columbia
+source env/bin/activate
+
+# All sources
 python qdarchive_pipeline.py
 
-# Zenodo only
+# Single source
 python qdarchive_pipeline.py --sources zenodo
-
-# Harvard Dataverse only (search-based crawler)
 python qdarchive_pipeline.py --sources harvard
-
-# Harvard OAI-PMH full harvest
-python qdarchive_pipeline.py --sources harvard-oai
-
-# Columbia Oral History Archive
 python qdarchive_pipeline.py --sources columbia
 
-# Custom database path
-python qdarchive_pipeline.py --db 23692652-sq26.db
-```
-
-### Download files to disk
-
-```bash
-# Download everything to ./archive/
-python qdarchive_pipeline.py --download
-
-# Download only QDA analysis files (.qdpx, .nvp, .mx24 …)
-python qdarchive_pipeline.py --download --extensions .qdpx .nvp .nvpx .mx24
-
-# Limit file size (skip files > 200 MB)
+# With file download
 python qdarchive_pipeline.py --download --max-file-size 200MB
-
-# Zenodo only, with file download, custom output directory
-python qdarchive_pipeline.py \
-    --sources zenodo \
-    --download \
-    --output-dir /data/qdarchive/files \
-    --db 23692652-sq26.db
 ```
 
-### Google Drive upload
+Resume an interrupted run by re-running the same command (state is saved automatically).
+
+---
+
+## Running Part 2 — Classification
 
 ```bash
-# Download files and upload to Google Drive (keep local copies)
-python qdarchive_pipeline.py --download --gdrive
+source env/bin/activate
 
-# Download, upload to Google Drive, then delete local copies
-python qdarchive_pipeline.py --download --gdrive-only
+# 1. LLM classification (requires Ollama with qwen2.5:7b or mistral)
+python classify_combined.py --db 23692652-sq26.db
 
-# Specific sources with Drive upload
-python qdarchive_pipeline.py --sources zenodo harvard --download --gdrive
-```
+# 2. Build training labels from LLM results
+python create_training_labels.py --db 23692652-sq26.db
 
-### Resuming an interrupted run
+# 3. Train and run BERT classifiers
+python classify_bert.py --db 23692652-sq26.db
+python classify_bert_division.py --db 23692652-sq26.db
 
-The pipeline saves pagination state to a `*.progress.json` file automatically.
-Just re-run the same command to continue from where it stopped:
+# 4. Train and run TF-IDF classifier
+python classify_tfidf.py --db 23692652-sq26.db
 
-```bash
-python qdarchive_pipeline.py --sources zenodo
-# interrupted … re-run the same command:
-python qdarchive_pipeline.py --sources zenodo
-```
+# 5. Combine votes into final classification
+python classify_vote.py --db 23692652-sq26.db
 
-To force a full re-crawl from the beginning:
+# 6. Classify individual files
+python classify_files_bert.py --db 23692652-sq26.db
 
-```bash
-rm metadata.*.progress.json
-python qdarchive_pipeline.py
-```
+# Or retrain everything at once
+bash retrain_all.sh
 
-### Continuous run wrapper
-
-For long overnight runs that should auto-restart on crash:
-
-```bash
-bash run_until_done.sh
+# Export results
+python generate_xlsx.py --db 23692652-sq26.db
+python generate_docx_report.py
 ```
 
 ---
 
-## CLI Reference
+## Database Schema
 
-| Flag | Default | Description |
+### Core tables (Part 1)
+
+| Table | Rows | Description |
 |---|---|---|
-| `--sources` | all | Which repos to crawl: `zenodo` `harvard` `harvard-oai` `columbia` |
-| `--db` | `./metadata.sqlite` | SQLite database path |
-| `--output-dir` | `./archive` | Root directory for downloaded files |
-| `--download` | off | Download files to disk |
-| `--extensions` | all | Whitelist of file extensions to download (e.g. `.qdpx .nvp`) |
-| `--max-records` | 0 (unlimited) | Max projects to collect per source |
-| `--max-file-size` | unlimited | Skip files larger than this (e.g. `200MB`, `512KB`) |
-| `--gdrive` | off | Upload downloaded files to Google Drive (keeps local copies) |
-| `--gdrive-only` | off | Upload to Google Drive and delete local files after upload |
+| `projects` | 53,080 | One row per dataset project |
+| `keywords` | 203,849 | Author-supplied keywords |
+| `person_role` | 159,344 | Authors and uploaders |
+| `licenses` | 49,603 | License identifiers |
+| `files` | 610,131 | Files deposited with each project |
+| `project_knowledge` | 53,080 | Enriched text + file snippets for classification |
 
----
+### Classification tables (Part 2)
 
-## Database Schema — `23692652-sq26.db`
-
-The database uses a normalised five-table schema. Each **project** (dataset)
-has a single row in `projects`; its keywords, authors, licenses, and file list
-are in the four related tables.
-
-### `projects`
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | INTEGER PK | Auto-incrementing primary key |
-| `query_string` | TEXT | Search query that found this dataset |
-| `repository_id` | INTEGER | Source repo identifier |
-| `repository_url` | TEXT | Base URL of the repository |
-| `project_url` | TEXT | Dataset landing page URL |
-| `version` | TEXT | Dataset version string |
-| `title` | TEXT | Dataset title |
-| `description` | TEXT | Abstract / description |
-| `language` | TEXT | Content language |
-| `doi` | TEXT | Persistent DOI, e.g. `10.5281/zenodo.14523891` |
-| `upload_date` | TEXT | Date deposited |
-| `download_date` | TEXT | Date crawled |
-| `download_repository_folder` | TEXT | Top-level archive folder (e.g. `zenodo`) |
-| `download_project_folder` | TEXT | Project subfolder |
-| `download_version_folder` | TEXT | Version subfolder (if any) |
-| `download_method` | TEXT | How the dataset was retrieved |
-| `gdrive_folder_id` | TEXT | Google Drive folder ID (if uploaded) |
-| `gdrive_folder_url` | TEXT | Google Drive folder URL (if uploaded) |
-
-### `keywords`
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `project_id` | INTEGER FK → `projects.id` | |
-| `keyword` | TEXT | One keyword per row |
-
-### `person_role`
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `project_id` | INTEGER FK → `projects.id` | |
-| `name` | TEXT | Person's name |
-| `role` | TEXT | Role (e.g. `author`, `uploader`) |
-
-### `licenses`
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `project_id` | INTEGER FK → `projects.id` | |
-| `license` | TEXT | License identifier (e.g. `CC0-1.0`) |
-
-### `project_files`
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `project_id` | INTEGER FK → `projects.id` | |
-| `file_name` | TEXT | Filename |
-| `file_type` | TEXT | `analysis` \| `primary` \| `additional` |
-| `file_size_bytes` | INTEGER | File size in bytes |
-| `status` | TEXT | Download status (e.g. `SUCCEEDED`, `PENDING`) |
-| `gdrive_file_id` | TEXT | Google Drive file ID (if uploaded) |
-| `gdrive_url` | TEXT | Google Drive file URL (if uploaded) |
-
----
-
-## File Type Classification
-
-Files are classified by extension at crawl time:
-
-| Type | Extensions | Meaning |
-|---|---|---|
-| `analysis` | `.qdpx` `.nvp` `.nvpx` `.mx24` `.mx22` `.atlasproj` `.mqda` … | QDA project files — primary archive target |
-| `primary` | `.pdf` `.docx` `.mp3` `.mp4` `.txt` `.csv` … | Source data: transcripts, recordings, documents |
-| `additional` | `.png` `.zip` `.md` *(everything else)* | Supporting files: READMEs, codebooks, images |
-
----
-
-## Search Query Strategy
-
-Queries are applied in tiers across all repositories. The `query_string` column
-in `projects` records which query found each dataset.
-
-| Tier | Examples | Goal |
-|---|---|---|
-| 1 — File extensions | `.qdpx` `.nvp` `.mx24` | Highest precision — matches exact files |
-| 2 — Software names | `NVivo` `MAXQDA` `ATLAS.ti` `Dedoose` | High precision |
-| 3 — Methodology | `interview transcripts` `thematic analysis` | High recall |
-| 4–9 | Data collection methods, discipline terms, German/French/Spanish terms | Broad coverage |
+| Table | Description |
+|---|---|
+| `classifications_combined` | LLM results (Qwen / Mistral / Claude) |
+| `classifications_bert_base` | bert-base-uncased — section only |
+| `classifications_bert_division` | DistilBERT — section + division (100% division coverage) |
+| `classifications_tfidf` | TF-IDF + Logistic Regression — section only |
+| `classifications_vote` | **Final**: majority vote ensemble — section + division |
+| `classifications_files` | Per-file BERT classifications (QDA + QD projects) |
+| `labels_training` | Silver labels used to train BERT and TF-IDF |
 
 ---
 
 ## Useful SQL Queries
 
 ```sql
--- Total projects per repository
-SELECT repository_url, COUNT(*) AS projects
-FROM   projects
-GROUP  BY repository_url;
+-- Final classification for all projects
+SELECT p.title, p.type, cv.section, cv.section_name,
+       cv.division, cv.division_name, cv.confidence
+FROM projects p JOIN classifications_vote cv ON p.id = cv.project_id
+ORDER BY cv.confidence DESC LIMIT 20;
 
--- All QDA analysis files
-SELECT p.title, p.doi, pf.file_name, pf.file_type, pf.gdrive_url
-FROM   projects p
-JOIN   project_files pf ON pf.project_id = p.id
-WHERE  pf.file_type = 'analysis'
-ORDER  BY p.repository_url, p.title;
+-- Section distribution across all projects
+SELECT section, section_name, COUNT(*) AS n,
+       ROUND(COUNT(*)*100.0/53080, 1) AS pct
+FROM classifications_vote
+GROUP BY section ORDER BY n DESC;
 
--- Projects with Google Drive links
-SELECT title, doi, gdrive_folder_url
-FROM   projects
-WHERE  gdrive_folder_id IS NOT NULL
-ORDER  BY repository_url;
+-- Confidence distribution
+SELECT confidence, COUNT(*), ROUND(COUNT(*)*100.0/53080,1) AS pct
+FROM classifications_vote
+GROUP BY confidence
+ORDER BY CASE confidence WHEN 'very_high' THEN 1 WHEN 'high' THEN 2
+         WHEN 'medium' THEN 3 ELSE 4 END;
 
--- Storage usage by repository
-SELECT p.repository_url,
-       COUNT(DISTINCT p.id)            AS projects,
-       COUNT(pf.id)                    AS files,
-       ROUND(SUM(pf.file_size_bytes) / 1e9, 2) AS total_gb
-FROM   projects p
-JOIN   project_files pf ON pf.project_id = p.id
-GROUP  BY p.repository_url;
+-- QDA projects with their ISIC classification
+SELECT p.title, p.repository_id, cv.section, cv.section_name,
+       cv.division, cv.division_name, cv.confidence
+FROM projects p JOIN classifications_vote cv ON p.id = cv.project_id
+WHERE p.type = 'QDA_PROJECT';
 
--- Most productive search queries
-SELECT query_string, COUNT(*) AS projects
-FROM   projects
-GROUP  BY query_string
-ORDER  BY projects DESC
-LIMIT  20;
-
--- Authors with the most deposited datasets
-SELECT pr.name, COUNT(DISTINCT pr.project_id) AS datasets
-FROM   person_role pr
-WHERE  pr.role = 'author'
-GROUP  BY pr.name
-ORDER  BY datasets DESC
-LIMIT  20;
-
--- License distribution
-SELECT l.license, COUNT(*) AS count
-FROM   licenses l
-GROUP  BY l.license
-ORDER  BY count DESC;
+-- File-level classifications for a specific project
+SELECT file_name, section, section_name, confidence, prob_top1
+FROM classifications_files WHERE project_id = 1;
 ```
 
 ---
 
-## Files Ignored by Git
+## Git Tags
 
-The following files are listed in `.gitignore` and are **not** committed:
-
-| File / Pattern | Reason |
+| Tag | Description |
 |---|---|
-| `credentials.json` | Google OAuth client secret — never share |
-| `token.pickle` | Google OAuth access token — never share |
-| `*.progress.json` | Pipeline resume state — ephemeral |
-| `pipeline.log` | Runtime log — ephemeral |
-| `env/` | Python virtual environment |
-| `.env` | Environment variable overrides |
-
-The database `23692652-sq26.db` is committed via **Git LFS** (see
-`.gitattributes`).
+| `part-1-release` | Completion of Part 1 (data collection) |
+| `classification-results` | Completion of Part 2 (classification pipeline) |
 
 ---
 
@@ -395,4 +321,4 @@ The downloaded datasets retain their original licenses as recorded in the
 
 ---
 
-*FAU Erlangen-Nürnberg · QDArchive Project · 2026*
+*FAU Erlangen-Nürnberg · QDArchive Project · Student ID: 23692652 · July 2026*
