@@ -33,6 +33,13 @@ pipeline.log
 *.db-wal
 
 # ── Generated reports & exports ───────────────────────────────
+# Methodology and per-repo reports — local only, not tracked in git
+23692652-sq26-classification-methodology.md
+23692652-sq26-classification-methodology.docx
+23692652-sq26-classification-methodology.pdf
+23692652-sq26-report-repo*.docx
+23692652-sq26-report-repo*.pdf
+
 # Word / Excel / PowerPoint outputs
 Classification_Report.docx
 QDArchive_*.docx
