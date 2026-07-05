@@ -34,6 +34,8 @@ pipeline.log
 
 # ── Generated reports & exports ───────────────────────────────
 # Methodology and classification reports — local only, not tracked in git
+23692652-sq26-classification-report.tex
+report_images/
 23692652-sq26-classification-methodology.md
 23692652-sq26-classification-methodology.docx
 23692652-sq26-classification-methodology.pdf
