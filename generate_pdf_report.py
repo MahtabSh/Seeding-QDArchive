@@ -477,35 +477,81 @@ def _page_division_histogram(pdf: PdfPages, repo_id: int, repo_name: str,
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-def generate_repo_pdf(conn: sqlite3.Connection, repo_id: int) -> str:
-    repo_name      = REPO_NAMES.get(repo_id, f"Repository {repo_id}")
-    section_counts = get_section_counts(conn, repo_id)
-    type_stats     = get_type_stats(conn, repo_id)
-    top20          = get_top20(conn, repo_id)
-    conf_stats     = get_confidence_stats(conn, repo_id)
-    top_divs       = get_top_divisions(conn, repo_id, n=15)
+def _page_repo_cover(pdf: PdfPages, repo_id: int, repo_name: str,
+                     total: int, type_stats: list[tuple]) -> None:
+    fig = plt.figure(figsize=(11.69, 8.27))
+    fig.patch.set_facecolor("white")
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.axis("off")
 
-    out_path = f"23692652-sq26-report-repo{repo_id}.pdf"
+    # Blue header bar
+    ax.add_patch(plt.Rectangle((0, 0.78), 1, 0.22,
+                                transform=ax.transAxes, color=BLUE_DARK,
+                                zorder=0))
+    ax.text(0.5, 0.89,
+            "SQ26 — ISIC Rev.5 Classification Report",
+            transform=ax.transAxes, fontsize=20, fontweight="bold",
+            ha="center", va="center", color="white", zorder=1)
+
+    ax.text(0.5, 0.60,
+            f"Repository {repo_id}:  {repo_name}",
+            transform=ax.transAxes, fontsize=16, fontweight="bold",
+            ha="center", va="center", color=BLUE_DARK)
+
+    ax.text(0.5, 0.48,
+            f"{total:,} projects classified",
+            transform=ax.transAxes, fontsize=13,
+            ha="center", va="center", color="#444")
+
+    type_lines = "     ".join(f"{t}: {c:,}" for t, c in type_stats)
+    ax.text(0.5, 0.38,
+            f"Project types:  {type_lines}",
+            transform=ax.transAxes, fontsize=10,
+            ha="center", va="center", color="#666")
+
+    ax.text(0.5, 0.10,
+            "Student ID: 23692652  ·  FAU Erlangen-Nürnberg  ·  SQ26 Project  ·  July 2026",
+            transform=ax.transAxes, fontsize=9,
+            ha="center", va="center", color="#999")
+
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+
+def generate_combined_pdf(conn: sqlite3.Connection,
+                          repo_ids: list[int],
+                          out_path: str) -> None:
     with PdfPages(out_path) as pdf:
-        _page_histogram(pdf, repo_id, repo_name,
-                        section_counts, type_stats, conf_stats)
-        _page_table_comments(pdf, repo_id, repo_name,
-                             top20, section_counts, type_stats, conf_stats)
-        _page_division_histogram(pdf, repo_id, repo_name,
-                                 top_divs, section_counts)
+        for repo_id in repo_ids:
+            repo_name      = REPO_NAMES.get(repo_id, f"Repository {repo_id}")
+            section_counts = get_section_counts(conn, repo_id)
+            type_stats     = get_type_stats(conn, repo_id)
+            top20          = get_top20(conn, repo_id)
+            conf_stats     = get_confidence_stats(conn, repo_id)
+            top_divs       = get_top_divisions(conn, repo_id, n=15)
+            total          = sum(c for _, _, c in section_counts)
 
-    print(f"[repo {repo_id}] Saved: {out_path}  "
-          f"(total {sum(c for _,_,c in section_counts):,} projects)")
-    return out_path
+            _page_repo_cover(pdf, repo_id, repo_name, total, type_stats)
+            _page_histogram(pdf, repo_id, repo_name,
+                            section_counts, type_stats, conf_stats)
+            _page_table_comments(pdf, repo_id, repo_name,
+                                 top20, section_counts, type_stats, conf_stats)
+            _page_division_histogram(pdf, repo_id, repo_name,
+                                     top_divs, section_counts)
+            print(f"  [repo {repo_id}] {repo_name} — {total:,} projects added")
+
+    print(f"\nSaved: {out_path}")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Generate PDF classification report per repository."
+        description="Generate combined PDF classification report for all repositories."
     )
     ap.add_argument("--db",   default=DB)
     ap.add_argument("--repo", nargs="+", type=int, default=None,
                     help="Specific repository IDs (default: all)")
+    ap.add_argument("--out",  default="23692652-sq26-classification-report.pdf",
+                    help="Output PDF filename")
     args = ap.parse_args()
 
     conn = sqlite3.connect(args.db)
@@ -515,12 +561,9 @@ def main() -> None:
         ).fetchall()
     ]
 
-    print(f"Generating PDF reports for {len(repo_ids)} repositories…\n")
-    for rid in repo_ids:
-        generate_repo_pdf(conn, rid)
-
+    print(f"Generating combined PDF for {len(repo_ids)} repositories…\n")
+    generate_combined_pdf(conn, repo_ids, args.out)
     conn.close()
-    print("\nAll done.")
 
 
 if __name__ == "__main__":

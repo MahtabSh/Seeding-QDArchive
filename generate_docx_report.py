@@ -640,18 +640,50 @@ def generate_repo_docx(conn, repo_id: int) -> str:
                     set_cell_bg(cell, alt)
         doc.add_paragraph()
 
-    out_path = f"23692652-sq26-report-repo{repo_id}.docx"
-    doc.save(out_path)
-    print(f"[repo {repo_id}] Saved: {out_path}  ({total:,} projects)")
-    return out_path
+    return doc
+
+
+def generate_combined_docx(conn: sqlite3.Connection,
+                            repo_ids: list[int],
+                            out_path: str) -> None:
+    from docx.oxml.ns import qn as _qn
+    from docx.oxml import OxmlElement as _OxmlElement
+
+    combined = Document()
+    for sec in combined.sections:
+        sec.top_margin    = Cm(2.2)
+        sec.bottom_margin = Cm(2.2)
+        sec.left_margin   = Cm(2.5)
+        sec.right_margin  = Cm(2.5)
+
+    for idx, repo_id in enumerate(repo_ids):
+        # Add page break between repos (not before the first)
+        if idx > 0:
+            pb = combined.add_paragraph()
+            run = pb.add_run()
+            br = _OxmlElement("w:br")
+            br.set(_qn("w:type"), "page")
+            run._r.append(br)
+
+        repo_doc = generate_repo_docx(conn, repo_id)
+        # Copy all paragraphs and tables from the per-repo document
+        for element in repo_doc.element.body:
+            combined.element.body.append(element.__class__(element.xml))
+
+        print(f"  [repo {repo_id}] added to combined document")
+
+    combined.save(out_path)
+    print(f"\nSaved: {out_path}")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Generate Word (.docx) classification reports per repository."
+        description="Generate combined Word (.docx) classification report for all repositories."
     )
     ap.add_argument("--db",   default=DB)
     ap.add_argument("--repo", nargs="+", type=int, default=None)
+    ap.add_argument("--out",  default="23692652-sq26-classification-report.docx",
+                    help="Output docx filename")
     args = ap.parse_args()
 
     conn = sqlite3.connect(args.db)
@@ -661,12 +693,9 @@ def main() -> None:
         ).fetchall()
     ]
 
-    print(f"Generating Word reports for {len(repo_ids)} repositories…\n")
-    for rid in repo_ids:
-        generate_repo_docx(conn, rid)
-
+    print(f"Generating combined Word report for {len(repo_ids)} repositories…\n")
+    generate_combined_docx(conn, repo_ids, args.out)
     conn.close()
-    print("\nAll done.")
 
 
 if __name__ == "__main__":
