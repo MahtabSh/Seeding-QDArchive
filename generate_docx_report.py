@@ -516,9 +516,10 @@ def build_comments(repo_id, repo_name, section_counts, type_stats, conf_stats):
     return bullets
 
 
-# ── Main report builder ─────────────────────────────────────────────────────────
+# ── Report content writer ────────────────────────────────────────────────────────
 
-def generate_repo_docx(conn, repo_id: int) -> str:
+def _write_repo_content(doc: Document, conn, repo_id: int) -> None:
+    """Write one repository's full report content into an existing Document."""
     repo_name      = REPO_NAMES.get(repo_id, f"Repository {repo_id}")
     section_counts = get_section_counts(conn, repo_id)
     type_stats     = get_type_stats(conn, repo_id)
@@ -527,15 +528,6 @@ def generate_repo_docx(conn, repo_id: int) -> str:
     top_divs       = get_top_divisions(conn, repo_id, n=15)
     total          = sum(c for _, _, c in section_counts)
     file_total, file_conf, file_top_secs = get_file_stats(conn, repo_id)
-
-    doc = Document()
-
-    # Page margins
-    for sec in doc.sections:
-        sec.top_margin    = Cm(2.2)
-        sec.bottom_margin = Cm(2.2)
-        sec.left_margin   = Cm(2.5)
-        sec.right_margin  = Cm(2.5)
 
     # ── Title block ──────────────────────────────────────────────────
     title = doc.add_paragraph()
@@ -571,7 +563,7 @@ def generate_repo_docx(conn, repo_id: int) -> str:
     add_chart_image(doc, hist_png, width_inches=6.0)
     doc.add_paragraph()
 
-    # ── Section 2: Full section table ───────────────────────────────
+    # ── Section 2: Full section table ────────────────────────────────
     add_section_summary_table(doc, section_counts, total)
 
     # ── Section 3: Top-20 table ──────────────────────────────────────
@@ -601,7 +593,6 @@ def generate_repo_docx(conn, repo_id: int) -> str:
             f"Repository {repo_id} contributed {file_total:,} classified files."
         ))
 
-        # Confidence table
         add_body(doc, "Confidence distribution:")
         conf_tbl = doc.add_table(rows=1 + len(file_conf), cols=3)
         conf_tbl.style = "Table Grid"
@@ -618,7 +609,6 @@ def generate_repo_docx(conn, repo_id: int) -> str:
             row[2].text = f"{pct}%"
         doc.add_paragraph()
 
-        # Top sections table
         add_body(doc, "Top ISIC sections across classified files:")
         sec_tbl = doc.add_table(rows=1 + len(file_top_secs), cols=4)
         sec_tbl.style = "Table Grid"
@@ -640,39 +630,30 @@ def generate_repo_docx(conn, repo_id: int) -> str:
                     set_cell_bg(cell, alt)
         doc.add_paragraph()
 
-    return doc
-
 
 def generate_combined_docx(conn: sqlite3.Connection,
                             repo_ids: list[int],
                             out_path: str) -> None:
-    from docx.oxml.ns import qn as _qn
-    from docx.oxml import OxmlElement as _OxmlElement
-
-    combined = Document()
-    for sec in combined.sections:
+    doc = Document()
+    for sec in doc.sections:
         sec.top_margin    = Cm(2.2)
         sec.bottom_margin = Cm(2.2)
         sec.left_margin   = Cm(2.5)
         sec.right_margin  = Cm(2.5)
 
     for idx, repo_id in enumerate(repo_ids):
-        # Add page break between repos (not before the first)
         if idx > 0:
-            pb = combined.add_paragraph()
+            # Page break between repos
+            pb = doc.add_paragraph()
             run = pb.add_run()
-            br = _OxmlElement("w:br")
-            br.set(_qn("w:type"), "page")
+            br = OxmlElement("w:br")
+            br.set(qn("w:type"), "page")
             run._r.append(br)
 
-        repo_doc = generate_repo_docx(conn, repo_id)
-        # Copy all paragraphs and tables from the per-repo document
-        for element in repo_doc.element.body:
-            combined.element.body.append(element.__class__(element.xml))
-
+        _write_repo_content(doc, conn, repo_id)
         print(f"  [repo {repo_id}] added to combined document")
 
-    combined.save(out_path)
+    doc.save(out_path)
     print(f"\nSaved: {out_path}")
 
 
