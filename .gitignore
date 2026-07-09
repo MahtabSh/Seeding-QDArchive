@@ -38,6 +38,8 @@ generate_docx_report.py
 generate_latex_report.py
 generate_pdf_report.py
 generate_xlsx.py
+build_docx.py
+build_pdf_doc.py
 
 # ── Generated reports & exports ───────────────────────────────
 # Methodology and classification reports — local only, not tracked in git
