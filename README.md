@@ -12,7 +12,7 @@ This project is divided into two parts:
 
 | Part | Description |
 |---|---|
-| **Part 1 — Data Collection** | Crawl Zenodo, Harvard Dataverse, and Columbia to collect 53,080 research dataset projects |
+| **Part 1 — Data Collection** | Crawl Zenodo, Harvard Dataverse, and Columbia to collect 51,818 research dataset projects |
 | **Part 2 — Classification** | Classify all projects by economic sector using ISIC Rev.5 via a 4-classifier ensemble |
 
 ---
@@ -23,19 +23,19 @@ This project is divided into two parts:
 
 | Repository | Records | Notes |
 |---|---|---|
-| **Zenodo** | 39,405 | Full API crawl across all query tiers |
-| **Harvard Dataverse** | 13,650 | Search + OAI-PMH crawl |
+| **Zenodo** | 39,393 | Full API crawl across all query tiers |
+| **Harvard Dataverse** | 12,400 | Search + OAI-PMH crawl |
 | **Columbia Oral History Archive** | 25 | Scraper only (no public API) |
-| **Total** | **53,080** | |
+| **Total** | **51,818** | After DOI-based deduplication |
 
 **Database file:** `23692652-sq26.db`
 
 | Table | Rows |
 |---|---|
-| `projects` | 53,080 |
-| `keywords` | 203,849 |
-| `person_role` | 159,344 |
-| `licenses` | 49,603 |
+| `projects` | 51,818 |
+| `keywords` | 201,089 |
+| `person_role` | 155,917 |
+| `licenses` | 48,495 |
 | `files` | 610,131 |
 
 ### Project Types
@@ -44,16 +44,16 @@ Each project is typed based on its file contents:
 
 | Type | Description | Count |
 |---|---|---|
-| `QD_PROJECT` | Qualitative data files (interviews, transcripts, surveys) | 35,289 |
-| `OTHER_PROJECT` | Research datasets of other kinds | 15,915 |
-| `NOT_A_PROJECT` | Entries that do not represent meaningful research datasets | 1,809 |
-| `QDA_PROJECT` | Contains QDA software project files (.qdpx, .nvpx, .atlproj, .mx22) | 67 |
+| `QD_PROJECT` | Qualitative data files (interviews, transcripts, surveys) | 34,677 |
+| `OTHER_PROJECT` | Research datasets of other kinds | 15,295 |
+| `NOT_A_PROJECT` | Entries that do not represent meaningful research datasets | 1,757 |
+| `QDA_PROJECT` | Contains QDA software project files (.qdpx, .nvpx, .atlproj, .mx22) | 64 |
 
 ---
 
 ## Part 2 — ISIC Rev.5 Classification
 
-All 53,080 projects were classified according to the **ISIC Rev.5** standard (International Standard Industrial Classification of All Economic Activities, Revision 5 — United Nations 2025).
+All 51,818 projects were classified according to the **ISIC Rev.5** standard (International Standard Industrial Classification of All Economic Activities, Revision 5 — United Nations 2025).
 
 Each project received:
 - A **primary class** — ISIC section (one of 22 letters A–V)
@@ -76,37 +76,37 @@ A 4-classifier voting ensemble was used. Each classifier contributes an independ
 
 ### Results Summary
 
-**Project-level (53,080 projects — 100% coverage):**
+**Project-level (51,793 projects excl. Columbia — 100% coverage):**
 
 | Confidence | Projects | % |
 |---|---|---|
-| very_high (4/4 agree) | 23,058 | 43.4% |
-| high (3/4 agree) | 19,361 | 36.5% |
-| medium (2/4 agree) | 9,871 | 18.6% |
-| low (1/4 agree) | 790 | 1.5% |
+| very_high (4/4 agree) | 22,539 | 43.5% |
+| high (3/4 agree) | 18,783 | 36.3% |
+| medium (2/4 agree) | 9,690 | 18.7% |
+| low (1/4 agree) | 781 | 1.5% |
 
-**File-level (2,787 files — QDA + QD projects in Harvard Dataverse):**
+**File-level (17,001 files — QDA + QD projects across all repositories):**
 
 | Confidence | Files | % |
 |---|---|---|
-| very_high | 1,886 | 67.7% |
-| high | 452 | 16.2% |
-| medium | 358 | 12.8% |
-| low | 91 | 3.3% |
+| very_high | 11,530 | 67.8% |
+| high | 2,716 | 16.0% |
+| medium | 2,013 | 11.8% |
+| low | 742 | 4.4% |
 
 ### Per-Repository Dominant ISIC Sections
 
 | Repo | Name | #1 Section | #2 Section | #3 Section |
 |---|---|---|---|---|
-| 1 | Zenodo | N — Professional/scientific | A — Agriculture | Q — Education |
-| 10 | Harvard Dataverse | P — Public administration | N — Professional/scientific | R — Human health |
-| 19 | Columbia | R — Human health | N — Professional/scientific | Q — Education |
+| 1 | Zenodo | N — Professional, scientific and technical activities | R — Human health and social work activities | Q — Education |
+| 10 | Harvard Dataverse | P — Public administration and defence | R — Human health and social work activities | N — Professional, scientific and technical activities |
+| 19 | Columbia | R — Human health and social work activities | N — Professional, scientific and technical activities | F — Construction |
 
 ### Submission Deliverables
 
 | File | Description |
 |---|---|
-| `23692652-sq26-classification.xlsx` | All 53,080 projects with primary + secondary class |
+| `23692652-sq26-classification.xlsx` | All 51,793 projects (excl. Columbia) with primary + secondary class |
 | `23692652-sq26-classification.db` | Full SQLite database with all classification tables |
 | `23692652-sq26-classification-methodology.*` | Methodology report (md / docx / pdf) — local only |
 | `23692652-sq26-report-repo{1,10,19}.*` | Per-repository reports (docx / pdf) — local only |
@@ -248,12 +248,12 @@ python generate_docx_report.py
 
 | Table | Rows | Description |
 |---|---|---|
-| `projects` | 53,080 | One row per dataset project |
-| `keywords` | 203,849 | Author-supplied keywords |
-| `person_role` | 159,344 | Authors and uploaders |
-| `licenses` | 49,603 | License identifiers |
+| `projects` | 51,818 | One row per dataset project |
+| `keywords` | 201,089 | Author-supplied keywords |
+| `person_role` | 155,917 | Authors and uploaders |
+| `licenses` | 48,495 | License identifiers |
 | `files` | 610,131 | Files deposited with each project |
-| `project_knowledge` | 53,080 | Enriched text + file snippets for classification |
+| `project_knowledge` | 51,818 | Enriched text + file snippets for classification |
 
 ### Classification tables (Part 2)
 
@@ -280,12 +280,12 @@ ORDER BY cv.confidence DESC LIMIT 20;
 
 -- Section distribution across all projects
 SELECT section, section_name, COUNT(*) AS n,
-       ROUND(COUNT(*)*100.0/53080, 1) AS pct
+       ROUND(COUNT(*)*100.0/51818, 1) AS pct
 FROM classifications_vote
 GROUP BY section ORDER BY n DESC;
 
 -- Confidence distribution
-SELECT confidence, COUNT(*), ROUND(COUNT(*)*100.0/53080,1) AS pct
+SELECT confidence, COUNT(*), ROUND(COUNT(*)*100.0/51818,1) AS pct
 FROM classifications_vote
 GROUP BY confidence
 ORDER BY CASE confidence WHEN 'very_high' THEN 1 WHEN 'high' THEN 2
