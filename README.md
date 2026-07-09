@@ -124,11 +124,6 @@ A 4-classifier voting ensemble was used. Each classifier contributes an independ
 | `create_training_labels.py` | Build silver training labels from LLM results |
 | `enrich_projects.py` | Add keyword and filename enrichment to project text |
 | `retrain_all.sh` | Re-run full classifier training pipeline end-to-end |
-| `generate_xlsx.py` | Export classification results to Excel |
-| `generate_pdf_report.py` | Generate per-repo PDF reports |
-| `generate_docx_report.py` | Generate per-repo Word reports |
-| `build_docx.py` | Convert methodology markdown to Word |
-| `build_pdf_doc.py` | Convert methodology markdown to PDF |
 
 ---
 
@@ -143,7 +138,6 @@ Seeding-QDArchive/
 ├── create_training_labels.py         # Silver label builder
 ├── enrich_projects.py                # Text enrichment
 ├── retrain_all.sh                    # Full retrain pipeline
-├── generate_*.py / build_*.py        # Report generators
 │
 ├── qdarchive_pipeline.py             # Entry-point — data collection (Part 1)
 ├── run_until_done.sh                 # Auto-restart wrapper
@@ -236,8 +230,7 @@ python classify_files_bert.py --db 23692652-sq26.db
 bash retrain_all.sh
 
 # Export results
-python generate_xlsx.py --db 23692652-sq26.db
-python generate_docx_report.py
+python classify_vote.py --db 23692652-sq26.db
 ```
 
 ---
