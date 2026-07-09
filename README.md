@@ -108,8 +108,6 @@ A 4-classifier voting ensemble was used. Each classifier contributes an independ
 |---|---|
 | `23692652-sq26-classification.xlsx` | All 51,793 projects (excl. Columbia) with primary + secondary class |
 | `23692652-sq26-classification.db` | Full SQLite database with all classification tables |
-| `23692652-sq26-classification-methodology.*` | Methodology report (md / docx / pdf) — local only |
-| `23692652-sq26-report-repo{1,10,19}.*` | Per-repository reports (docx / pdf) — local only |
 
 ### Classification Scripts
 
