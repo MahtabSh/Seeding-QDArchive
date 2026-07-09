@@ -129,29 +129,41 @@ A 4-classifier voting ensemble was used. Each classifier contributes an independ
 
 ```
 Seeding-QDArchive/
-├── 23692652-sq26-classification.db   # Submission DB — all classification tables (Git LFS)
-├── 23692652-sq26-classification.xlsx # Submission spreadsheet
+├── 23692652-sq26.db                   # Main DB — Part 1 data collection (Git LFS)
+├── 23692652-sq26-classification.db    # Submission DB — all classification tables (Git LFS)
+├── 23692652-sq26-classification.xlsx  # Submission spreadsheet
 │
-├── classify_*.py                     # Classifier scripts (Part 2)
-├── create_training_labels.py         # Silver label builder
-├── enrich_projects.py                # Text enrichment
-├── retrain_all.sh                    # Full retrain pipeline
+├── qdarchive_pipeline.py              # Entry-point — data collection (Part 1)
+├── run_until_done.sh                  # Auto-restart wrapper
+├── merge_databases.py                 # One-time DB merge utility
 │
-├── qdarchive_pipeline.py             # Entry-point — data collection (Part 1)
-├── run_until_done.sh                 # Auto-restart wrapper
-├── merge_databases.py                # One-time DB merge utility
+├── classify_combined.py               # LLM classification (Qwen / Mistral / Claude)
+├── classify_bert.py                   # BERT section classifier
+├── classify_bert_division.py          # DistilBERT section + division classifier
+├── classify_files_bert.py             # Per-file BERT classification
+├── classify_tfidf.py                  # TF-IDF + Logistic Regression classifier
+├── classify_vote.py                   # Voting ensemble — produces final labels
+├── create_training_labels.py          # Silver label builder for BERT/TF-IDF training
+├── enrich_projects.py                 # Keyword and filename enrichment
+├── retrain_all.sh                     # Full retrain pipeline
 │
-├── models/                           # Fine-tuned model weights (not tracked in git)
-│   ├── bert_base_isic_v1/            # bert-base-uncased fine-tuned on ISIC sections
-│   └── bert_division_isic_v1/        # DistilBERT fine-tuned on ISIC sections + divisions
+├── report_figures.ipynb               # Interactive charts and figures notebook
+├── classification_analysis.ipynb      # Classification analysis notebook
+├── notebooks/
+│   └── isic.ipynb                     # ISIC taxonomy exploration
 │
-└── qdarchive/                        # Core package (Part 1)
+├── models/                            # Fine-tuned model weights (not tracked in git)
+│   ├── bert_base_isic_v1/             # bert-base-uncased fine-tuned on ISIC sections
+│   └── bert_division_isic_v1/         # DistilBERT fine-tuned on ISIC sections + divisions
+│
+└── qdarchive/                         # Core package (Part 1)
     ├── pipeline.py
     ├── db.py
     ├── queries.py
-    ├── ensemble_classifier.py        # LLM-based classifier
-    ├── isic_enriched.py              # ISIC Rev.5 division metadata
-    ├── nli_classifier.py             # NLI zero-shot classifier
+    ├── config.py
+    ├── ensemble_classifier.py         # LLM-based classifier
+    ├── isic_enriched.py               # ISIC Rev.5 division metadata
+    ├── nli_classifier.py              # NLI zero-shot classifier
     ├── crawlers/
     │   ├── zenodo.py
     │   ├── harvard.py
@@ -159,7 +171,8 @@ Seeding-QDArchive/
     │   └── columbia.py
     └── fetchers/
         ├── base.py
-        └── zenodo.py
+        ├── zenodo.py
+        └── ...                        # Additional source fetchers
 ```
 
 ---
