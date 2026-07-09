@@ -32,6 +32,12 @@ pipeline.log
 *.db-shm
 *.db-wal
 
+# ── Report generator scripts (local use only) ─────────────────
+generate_docx_report.py
+generate_latex_report.py
+generate_pdf_report.py
+generate_xlsx.py
+
 # ── Generated reports & exports ───────────────────────────────
 # Methodology and classification reports — local only, not tracked in git
 23692652-sq26-classification-report.tex
