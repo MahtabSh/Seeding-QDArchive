@@ -6,7 +6,8 @@
 *.db
 *.db-shm
 *.db-wal
-# Submission DB tracked via git-lfs
+# Both DBs tracked via git-lfs
+!23692652-sq26.db
 !23692652-sq26-classification.db
 
 # ── Pipeline outputs ──────────────────────────────────────────
